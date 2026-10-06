@@ -28,7 +28,13 @@ SETTINGS = dict(
     GALLERY_MAX_SAMPLES=8,        # the per-metabolite gallery is only drawn for small runs
     LIBRARY_DIR=None,             # None = the library folder shipped with the package
     OVERLAYS=True,                # write one overlay PDF per spectrum
-    PLURONIC="auto",              # add Pluronic F-68 polymer terms: "auto" (if a large PEO line is present), "yes", "no"
+    PLURONIC="auto",              # Pluronic F-68 (poloxamer): "auto" = model it if its PEO line is present, "yes" = always
+                                  # model it, "ignore" = leave its regions out of the fit, "no" = not in the samples
+    PLURONIC_REGIONS=[(3.69, 3.74), (1.10, 1.20)],   # PEO line and PPO methyl, used when PLURONIC = "ignore"
+    SAMPLE_DIRS=None,             # optional {sample: (EXPNO folder, procno)}, e.g. FIDs processed into another folder
+    FID_MODE="missing",           # raw FIDs: "missing" = process an FID only where there is no processed spectrum,
+                                  # "all" = always process from the FID, "never" = only use TopSpin-processed spectra
+    FID_LB=0.3,                   # line broadening (Hz) when MANC-Q processes FIDs
     PEO_DETECT_SNR=500,           # "auto": PEO line at 3.71 ppm taller than this x noise
     PEAKLIST_FIELD_MHZ=800.0,     # field at which the fixed peak lists in the library are defined
 
@@ -41,7 +47,7 @@ SETTINGS = dict(
 
     # fitting
     FIT_RANGE=(0.60, 9.60),
-    EXCLUDE=[(4.60, 5.00)],       # residual water
+    EXCLUDE=[(4.60, 5.00)],       # regions left out of the fit (ppm); default: residual water
     PEO_CORE_HZ=8.0,              # Pluronic PEO line centre excluded when taller than PEO_CORE_MIN_SNR x noise
     PEO_CORE_MIN_SNR=20000,
     MAX_SHIFT_HZ=8.0,             # compound-level shift freedom around library + global offset
@@ -99,19 +105,36 @@ from scipy.optimize import lsq_linear, least_squares, nnls
 from scipy.interpolate import BSpline
 from scipy.signal import find_peaks
 import nmrglue as ng
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 from matplotlib.backends.backend_pdf import PdfPages
+
+
+class _plt:
+    """Backend-independent stand-in for the two pyplot calls used here, so importing the engine never changes
+    the matplotlib backend (the GUI draws with Qt in the same process)."""
+    @staticmethod
+    def subplots(nrows=1, ncols=1, figsize=None, squeeze=True, **kw):
+        fig = Figure(figsize=figsize)
+        ax = fig.subplots(nrows, ncols, squeeze=squeeze, **kw)
+        return fig, ax
+
+    @staticmethod
+    def close(fig=None):
+        pass
+
+
+plt = _plt
 
 from .spinsim import simulate_spin_system, merge_sticks
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
 S = SETTINGS
+import copy as _copy
+DEFAULT_SETTINGS = _copy.deepcopy(SETTINGS)
 TIMING = {}
 
 
@@ -119,11 +142,14 @@ TIMING = {}
 # 1. Reading
 # =============================================================================
 DECONV = "Deconvolution estimate (low confidence)"
+NOTMEAS = "Not measurable (region ignored)"
 
 
 def read_spectrum(expdir, procno):
     pdir = os.path.join(expdir, "pdata", str(procno))
-    dic, data = ng.bruker.read_pdata(pdir, scale_data=True, read_acqus=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        dic, data = ng.bruker.read_pdata(pdir, scale_data=True, read_acqus=False)
     p = dic["procs"]
     if np.ndim(data) != 1:
         raise ValueError(f"{pdir}: not a 1D spectrum")
@@ -150,13 +176,19 @@ def read_spectrum(expdir, procno):
     return ppm, y, sf, title
 
 
-def list_samples(data_dir, procno):
-    """EXPNO folders under data_dir that contain pdata/<procno>/1r, or data_dir itself if it is one."""
-    if os.path.exists(os.path.join(data_dir, "pdata", str(procno), "1r")):
-        return [""]
+def _usable(d, procno, fids):
+    return os.path.exists(os.path.join(d, "pdata", str(procno), "1r")) or \
+        (fids and os.path.exists(os.path.join(d, "fid")) and os.path.exists(os.path.join(d, "acqus")))
+
+
+def list_samples(data_dir, procno, fids=False):
+    """EXPNO folders under data_dir with pdata/<procno>/1r (or, if fids, a raw fid + acqus). If data_dir is itself
+    an EXPNO folder, returns [""]."""
+    if os.path.exists(os.path.join(data_dir, "acqus")) or os.path.isdir(os.path.join(data_dir, "pdata")):
+        return [""] if _usable(data_dir, procno, fids) else []
     out = []
     for d in sorted(os.listdir(data_dir), key=lambda x: (len(x), x)):
-        if os.path.exists(os.path.join(data_dir, d, "pdata", str(procno), "1r")):
+        if os.path.isdir(os.path.join(data_dir, d)) and _usable(os.path.join(data_dir, d), procno, fids):
             out.append(d)
     return out
 
@@ -878,6 +910,17 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
 # =============================================================================
 # 6. Grading, peak lists
 # =============================================================================
+def _excluded_fraction(m):
+    """Fraction of a multiplet's intensity whose lines sit in an ignored region or outside the fitted range."""
+    pos = np.asarray(m["p"], float) + float(m["d"])
+    it = np.asarray(m["it"], float)
+    lo, hi = S["FIT_RANGE"]
+    out = (pos < lo) | (pos > hi)
+    for a_, b_ in S["EXCLUDE"]:
+        out |= (pos > a_) & (pos < b_)
+    return float(it[out].sum() / it.sum()) if it.sum() > 0 else 1.0
+
+
 def grade(res, lib, sf, cf):
     """cf converts a per-proton area to mM in the medium. Per-multiplet quality
     measures come from the local (ROI) fits, where each multiplet has its own
@@ -889,6 +932,14 @@ def grade(res, lib, sf, cf):
     for k, c in enumerate(lib):
         a = res["amp"][k]
         mps = [m for m in res["MP"] if m["k"] == k]
+        if mps and all(m["unit_peak"] <= 0 or _excluded_fraction(m) >= 0.9 for m in mps):
+            # every multiplet of this compound lies in an excluded region: nothing to fit
+            rows.append(dict(metabolite=c["name"], cls=c["cls"], tier=NOTMEAS, conc_mM=np.nan, se_mM=np.nan,
+                             whole_compound_fit_mM=np.nan, method="all multiplets inside ignored regions",
+                             LOD_mM=np.nan, upper_bound_mM=np.nan, snr=0.0, best_dominance=np.nan,
+                             best_misfit=np.nan, n_reporters=0, reporter_ratio=np.nan,
+                             source=c["source"], provenance=c["provenance"]))
+            continue
         unit_peak = max(m["unit_peak"] for m in mps) if mps else 0
         snr = a * unit_peak / sig if a > 0 else 0.0
         clean, usable = [], []
@@ -1046,7 +1097,7 @@ def observed_peaks(res, lib, sample, sf):
 PALETTE = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#17becf",
            "#bcbd22", "#393b79", "#637939", "#8c6d31", "#843c39", "#7b4173", "#3182bd", "#e6550d"]
 TAG = {"Quantified": "Q", "Overlapped (semi-quantitative)": "O", DECONV: "D",
-       "Upper bound only": "U", "Not detected": ""}
+       "Upper bound only": "U", "Not detected": "", NOTMEAS: ""}
 
 
 def gapped(x, *ys, dx=None):
@@ -1286,6 +1337,14 @@ def process_sample(job):
             [f"Sample {smp} FAILED: {type(exc).__name__}: {exc}", traceback.format_exc()]
 
 
+def sample_source(smp):
+    """(EXPNO folder, procno) for a sample: SAMPLE_DIRS if given, else DATA_DIR/<sample>, PROCNO."""
+    sd = S.get("SAMPLE_DIRS") or {}
+    if smp in sd:
+        return sd[smp]
+    return os.path.join(S["DATA_DIR"], smp), S["PROCNO"]
+
+
 def detect_pluronic(ppm, y):
     """True if the spectrum has the tall PEO line of Pluronic F-68 near 3.71 ppm."""
     m = (ppm > 3.69) & (ppm < 3.74)
@@ -1295,7 +1354,8 @@ def detect_pluronic(ppm, y):
 def _fit_one(smp, d, libdir, out):
     lines = []
     log = lambda msg: lines.append(msg)
-    ppm, y, sf, title = read_spectrum(os.path.join(S["DATA_DIR"], smp), S["PROCNO"])
+    expdir, procno = sample_source(smp)
+    ppm, y, sf, title = read_spectrum(expdir, procno)
     pluronic = detect_pluronic(ppm, y) if S["PLURONIC"] == "auto" else S["PLURONIC"] == "yes"
     lib = prepare_library(build_library(sf, libdir, os.path.join(out, "_cache")), sf, pluronic)
     log(f"Sample {smp}  (title: {title}, dilution x{d}, {sf:.2f} MHz"
@@ -1343,7 +1403,7 @@ def _fit_one(smp, d, libdir, out):
 
 
 TIER_ORDER = {"Quantified": 0, "Overlapped (semi-quantitative)": 1, DECONV: 2,
-              "Upper bound only": 3, "Not detected": 4}
+              "Upper bound only": 3, "Not detected": 4, NOTMEAS: 5}
 
 
 def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
@@ -1364,7 +1424,9 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
     for m in report.index:
         for s_ in report.columns:
             t = tier.loc[m, s_]
-            if t == "Not detected":
+            if t == NOTMEAS:
+                report.loc[m, s_] = "n/m"
+            elif t == "Not detected":
                 report.loc[m, s_] = f"<{lod.loc[m, s_]:.2g}"
             elif t == "Upper bound only":
                 report.loc[m, s_] = f"<={conc.loc[m, s_]:.2g}"
@@ -1375,7 +1437,7 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
     summ = pd.DataFrame(dict(best_tier=best_tier))
     summ["class"] = G.groupby("metabolite").cls.first()
     for lab, cond in [("n_quantified", G.tier == "Quantified"), ("n_overlapped", G.tier.str.startswith("Overlapped")),
-                      ("n_detected_any", G.tier != "Not detected")]:
+                      ("n_detected_any", ~G.tier.isin(["Not detected", NOTMEAS]))]:
         summ[lab] = G[cond].groupby("metabolite").size()
     summ = summ.fillna({"n_quantified": 0, "n_overlapped": 0, "n_detected_any": 0})
     summ["mean_conc_mM"] = conc.mean(axis=1)
@@ -1397,7 +1459,7 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         f"SNR>={S['LOQ_SNR']} but the best multiplet is shared (dominance {S['O_MIN_DOMINANCE']:.0%}-{S['Q_MIN_DOMINANCE']:.0%}) or misfit <= {S['O_MAX_MISFIT']}. Number depends on the overlap partners: use for trends.",
         f"No multiplet of this metabolite is resolved enough to quantify on its own, but the whole-compound least-squares fit over >={S['DECONV_MIN_MULTIPLETS']} fitted multiplets is well determined (relative SE <= {S['DECONV_MAX_REL_SE']:.0%}) and sits below the data upper bound. The value is that deconvolution estimate, shown with a ~ in Report_mM. It depends on the library explaining the overlapping signals correctly, so treat it as an estimate, not a measurement.",
         f"Signal is present where the metabolite would appear but it cannot be attributed to it with confidence (no usable reporter, or a multiplet the library predicts >{S['CONTRADICT_MIN_SNR']}x noise is missing). The value is the largest concentration the data allow (upper bound).",
-        "Below the detection limit; Report_mM shows <LOD in mM.",
+        "Below the detection limit; Report_mM shows <LOD in mM. 'n/m' = not measurable: every peak of the metabolite lies in a region left out of the fit.",
         "Standard error from the least-squares fit only (noise + local misfit). Excludes library, relaxation (T1) and TSP weighing errors.",
         f"{sum(c['source']=='GISSMO' for c in lib)} GISSMO spin systems (BMRB, QM-simulated at the spectrometer frequency) + {sum(c['source']=='CASMDB' for c in lib)} fixed peak lists (CASMDB) + optional Pluronic F-68 terms. See Library sheet.",
         "Every multiplet of every metabolite in every sample: fitted centre, range, line positions and relative intensities, protons, linewidth, shift from library, dominance, misfit, concentration from that multiplet alone, and whether it was used as a reporter.",
@@ -1442,17 +1504,29 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
     return G
 
 
-def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, **settings):
-    """Quantify every spectrum under data_dir (or the single EXPNO folder data_dir) into out_dir."""
+def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, progress=None, cancel=None, **settings):
+    """Quantify every spectrum under data_dir (or the single EXPNO folder data_dir) into out_dir.
+
+    progress(event, sample, info): optional callback; events are "run_started", "sample_started",
+    "sample_done", "sample_failed", "cancelled", "aggregating", "finished".
+    cancel(): optional function returning True to stop; spectra already running are finished first."""
     if ref_mm is None or ref_mm <= 0:
         raise ValueError("the reference (TSP/DSS) concentration in the tube, in mM, is required")
+    say = progress or (lambda *a, **k: None)
+    stop = cancel or (lambda: False)
+    S.clear(); S.update(_copy.deepcopy(DEFAULT_SETTINGS))   # each run starts from the defaults
     S.update(settings)
-    S.update(DATA_DIR=os.path.abspath(data_dir), OUT_DIR=os.path.abspath(out_dir), TSP_MM_IN_TUBE=float(ref_mm),
-             DEFAULT_DILUTION=float(dilution), DILUTION_FILE=dilution_file)
-    samples = S["SAMPLES"] or list_samples(S["DATA_DIR"], S["PROCNO"])
-    if samples == [""]:                       # data_dir is itself one EXPNO folder
-        S["DATA_DIR"], one = os.path.split(S["DATA_DIR"].rstrip("/\\"))
-        samples = [one]
+    S.update(DATA_DIR=os.path.abspath(data_dir) if data_dir else None, OUT_DIR=os.path.abspath(out_dir),
+             TSP_MM_IN_TUBE=float(ref_mm), DEFAULT_DILUTION=float(dilution), DILUTION_FILE=dilution_file)
+    if S["PLURONIC"] == "ignore":
+        S["EXCLUDE"] = list(S["EXCLUDE"]) + [r for r in S["PLURONIC_REGIONS"] if r not in S["EXCLUDE"]]
+    if S["SAMPLES"]:
+        samples = list(S["SAMPLES"])
+    else:
+        samples = list_samples(S["DATA_DIR"], S["PROCNO"], fids=S["FID_MODE"] != "never")
+        if samples == [""]:                       # data_dir is itself one EXPNO folder
+            S["DATA_DIR"], one = os.path.split(S["DATA_DIR"].rstrip("/\\"))
+            samples = [one]
     if not samples:
         raise FileNotFoundError(f"no spectra found: expected <EXPNO>/pdata/{S['PROCNO']}/1r under {data_dir}")
     out = S["OUT_DIR"]
@@ -1464,26 +1538,96 @@ def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, **settings)
 
     libdir = S["LIBRARY_DIR"] or os.path.join(HERE, "library")
     dil = read_dilutions(S["DILUTION_FILE"])
+    # raw FIDs: process them (automatic phasing) into <out>/_fid_processed unless already given in SAMPLE_DIRS
+    sd = dict(S.get("SAMPLE_DIRS") or {})
+    if S["FID_MODE"] != "never":
+        from . import fidproc
+        for smp in samples:
+            if smp in sd:
+                continue
+            ed = os.path.join(S["DATA_DIR"], smp)
+            if fidproc.has_fid(ed) and (S["FID_MODE"] == "all" or not fidproc.has_processed(ed, S["PROCNO"])):
+                dest = os.path.join(out, "_fid_processed", smp)
+                say("fid_processing", smp, dict(k=len(sd) + 1, n=len(samples)))
+                r = fidproc.process_fid(ed, lb=S["FID_LB"])
+                fidproc.write_processed(r, dest, title=f"EXPNO {smp} (from FID)")
+                open(os.path.join(dest, "processing.txt"), "w").write(
+                    f"Processed from {ed} by MANC-Q: LB {r['lb']} Hz, SI {r['si']}, automatic phase "
+                    f"ph0 {r['ph0']:.2f}, ph1 {r['ph1']:.2f}\n")
+                sd[smp] = (dest, 1)
+                log(f"EXPNO {smp}: processed from the FID (automatic phase ph0 {r['ph0']:.1f}, ph1 {r['ph1']:.1f}); "
+                    f"check its overlay")
+    S["SAMPLE_DIRS"] = sd
+    os.makedirs(os.path.join(out, "_per_sample"), exist_ok=True)
+    json.dump({k: v for k, v in S.items() if k != "OVERLAY_REGIONS"},
+              open(os.path.join(out, "_per_sample", "run_settings.json"), "w"), indent=1, default=str)
     log(f"MANC-Q {__version__}   {time.strftime('%Y-%m-%d %H:%M')}\nData: {S['DATA_DIR']}\n"
-        f"Samples ({len(samples)}): {samples}\nReference: {S['REFERENCE']} {S['TSP_MM_IN_TUBE']} mM in tube")
-    _, _, sf, _ = read_spectrum(os.path.join(S["DATA_DIR"], samples[0]), S["PROCNO"])
+        f"Samples ({len(samples)}): {samples}\nReference: {S['REFERENCE']} {S['TSP_MM_IN_TUBE']} mM in tube\n"
+        f"Ignored regions (ppm): {', '.join(f'{a:.2f}-{b:.2f}' for a, b in S['EXCLUDE'])}\n"
+        f"Pluronic F-68: {S['PLURONIC']}")
+    d0, p0 = sample_source(samples[0])
+    _, _, sf, _ = read_spectrum(d0, p0)
     log(f"Library at {sf:.3f} MHz ...")
-    lib = prepare_library(build_library(sf, libdir, os.path.join(out, "_cache")), sf, S["PLURONIC"] != "no")
+    lib = prepare_library(build_library(sf, libdir, os.path.join(out, "_cache")), sf, S["PLURONIC"] in ("auto", "yes"))
     log(f"  {sum(c['source']=='GISSMO' for c in lib)} GISSMO spin systems, "
         f"{sum(c['source']=='CASMDB' for c in lib)} peak lists, {sum(c['source']=='polymer' for c in lib)} polymer terms")
     nw = S["N_WORKERS"] or max(1, min(len(samples), (os.cpu_count() or 2) - 1))
-    jobs = [(smp, dil.get(smp, S["DEFAULT_DILUTION"]), libdir, out, dict(S)) for smp in samples]
+    nw = max(1, min(nw, len(samples)))
+    jobs = {smp: (smp, dil.get(smp, S["DEFAULT_DILUTION"]), libdir, out, dict(S)) for smp in samples}
     log(f"Fitting {len(samples)} spectra with {nw} worker(s); a few minutes per spectrum ...")
-    if nw > 1 and len(samples) > 1:
-        from concurrent.futures import ProcessPoolExecutor
-        with ProcessPoolExecutor(max_workers=nw) as ex:
-            outputs = list(ex.map(process_sample, jobs))
-    else:
-        outputs = [process_sample(j) for j in jobs]
-    grades, peaks, obs, qc, failed = [], [], [], [], []
-    for smp, (gr, pk, ob, q, res, lines) in zip(samples, outputs):
+    say("run_started", None, dict(n=len(samples), workers=nw, sf=sf))
+    results, cancelled = {}, []
+
+    def finished(smp, output, t0):
+        gr, pk, ob, q, res, lines = output
         for ln in lines:
             log(ln)
+        results[smp] = output
+        if gr is None:
+            say("sample_failed", smp, dict(error=q.get("error", "unknown error"), seconds=time.time() - t0))
+        else:
+            say("sample_done", smp, dict(seconds=time.time() - t0, n_quantified=int((gr.tier == "Quantified").sum()),
+                                         explained=float(q.get("signal_explained_by_library", np.nan)),
+                                         reused=any("re-used" in ln for ln in lines)))
+
+    queue = list(samples)
+    # Spectra are fitted in worker processes with single-threaded linear algebra. Multi-threaded BLAS
+    # gives tiny run-to-run rounding differences that can flip a grid-search choice; with one thread per worker the
+    # results are identical every time, from the command line, the GUI or Python.
+    for var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS",
+                "NUMEXPR_NUM_THREADS"):
+        os.environ[var] = "1"
+    from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
+    import multiprocessing
+    # "spawn" everywhere: the Windows behaviour, and safe when called from a GUI
+    with ProcessPoolExecutor(max_workers=nw, mp_context=multiprocessing.get_context("spawn")) as ex:
+        running = {}
+        while queue or running:
+            while queue and len(running) < nw and not stop():
+                smp = queue.pop(0)
+                say("sample_started", smp, {})
+                running[ex.submit(process_sample, jobs[smp])] = (smp, time.time())
+            if stop() and queue:
+                cancelled, queue = queue, []
+            if not running:
+                break
+            done, _ = wait(list(running), timeout=1.0, return_when=FIRST_COMPLETED)
+            for fut in done:
+                smp, t0 = running.pop(fut)
+                try:
+                    output = fut.result()
+                except Exception as exc:          # worker crashed
+                    output = (None, None, None, dict(sample=smp, error=f"{type(exc).__name__}: {exc}"), None,
+                              [f"Sample {smp} FAILED: {exc}"])
+                finished(smp, output, t0)
+    if cancelled:
+        log(f"\nCancelled: {len(cancelled)} spectra not fitted: {cancelled}")
+        say("cancelled", None, dict(not_fitted=cancelled))
+    grades, peaks, obs, qc, failed = [], [], [], [], []
+    for smp in samples:
+        if smp not in results:
+            continue
+        gr, pk, ob, q, res, lines = results[smp]
         if gr is None:
             failed.append(smp); qc.append(q); continue
         grades.append(gr); peaks.append(pk); obs.append(ob); qc.append(q)
@@ -1491,7 +1635,11 @@ def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, **settings)
         log(f"\n*** {len(failed)} spectra failed and are not in the tables: {failed}")
     if not grades:
         logf.close()
+        say("finished", None, dict(ok=False, failed=failed, cancelled=cancelled))
         raise RuntimeError("no spectrum could be fitted; see run_log.txt")
-    G = aggregate_outputs(out, grades, peaks, obs, qc, lib, [s for s in samples if s not in failed], log)
+    say("aggregating", None, {})
+    done_samples = [s_ for s_ in samples if s_ in results and results[s_][0] is not None]
+    G = aggregate_outputs(out, grades, peaks, obs, qc, lib, done_samples, log)
     logf.close()
+    say("finished", None, dict(ok=True, failed=failed, cancelled=cancelled, out=out))
     return G

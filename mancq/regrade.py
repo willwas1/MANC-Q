@@ -9,6 +9,20 @@ from . import engine as q
 
 def regrade(out, library_dir=None):
     per = os.path.join(out, "_per_sample")
+    sfile = os.path.join(per, "run_settings.json")
+    if os.path.exists(sfile):                 # the run's own settings (ignored regions, reference, ...)
+        import json
+        saved = json.load(open(sfile))
+        for k in ("EXCLUDE", "FIT_RANGE", "PLURONIC_REGIONS"):
+            if k in saved:
+                saved[k] = [tuple(x) for x in saved[k]] if k != "FIT_RANGE" else tuple(saved[k])
+        saved.pop("SAMPLE_DIRS", None)
+        keep = {k: q.S[k] for k in ("LOD_SNR", "LOQ_SNR", "Q_MIN_DOMINANCE", "Q_MAX_MISFIT", "MAX_REPORTER_RATIO",
+                                     "MAX_CONC_OVER_BOUND", "SINGLE_REPORTER_MIN_SHARE", "CONTRADICT_MIN_SNR",
+                                     "CONTRADICT_FRACTION", "O_MIN_DOMINANCE", "O_MAX_MISFIT", "DECONV_MAX_REL_SE",
+                                     "DECONV_MIN_MULTIPLETS")}
+        q.S.update(saved)
+        q.S.update(keep)                      # grading rules come from the current code / SETTINGS
     files = sorted([f for f in os.listdir(per) if f.endswith("_fit.npz")], key=lambda f: (len(f), f))
     samples = [f[:-len("_fit.npz")] for f in files]
     libdir = library_dir or os.path.join(q.HERE, "library")
