@@ -1,0 +1,160 @@
+Getting Started on Windows
+
+If you are using MANC-Q on a new Windows computer, follow these steps before running the commands in the rest of this README.
+
+Important: The commands below are intended to be run in Windows Command Prompt or PowerShell, not directly as Python code in a Jupyter Notebook.
+
+1. Install Python
+
+MANC-Q requires Python 3.9 or later.
+
+Download and install Python from the official Python website:
+
+https://www.python.org/downloads/
+
+During installation, make sure to select:
+
+Add Python to PATH
+
+After installation, open Command Prompt or PowerShell and check that Python is available:
+
+python --version
+
+
+You should see something similar to:
+
+Python 3.12.7
+
+
+If python is not recognised, Python has either not been installed correctly or has not been added to your PATH.
+
+2. Install Git
+
+MANC-Q is hosted on GitHub and uses Git to download the software.
+
+Download and install Git for Windows:
+
+https://git-scm.com/download/win
+
+After installation, close and reopen Command Prompt or PowerShell.
+
+Check that Git is available:
+
+git --version
+
+
+You should see something similar to:
+
+git version 2.x.x
+
+
+If git is not recognised, Git has either not been installed correctly or is not available on your PATH.
+
+3. Download MANC-Q
+
+Choose a folder where you want to keep MANC-Q. For example:
+
+cd "C:\Users\<your-username>\Documents"
+
+
+Then download the MANC-Q repository:
+
+git clone https://github.com/willwas1/manc-q.git
+
+
+Enter the MANC-Q directory:
+
+cd manc-q
+
+
+You can check that you are in the correct directory with:
+
+dir
+
+
+You should see files including:
+
+requirements.txt
+
+4. Install the required Python packages
+
+Install the dependencies with:
+
+python -m pip install -r requirements.txt
+
+
+Using python -m pip rather than just pip helps ensure that the packages are installed into the Python installation you are using.
+
+5. Check that MANC-Q works
+
+Before analysing your own NMR data, run the built-in demonstration:
+
+python -m mancq demo
+
+
+The demo generates a synthetic 600 MHz spectrum containing 18 metabolites, quantifies it, and compares the recovered concentrations with the known concentrations.
+
+The demonstration takes approximately 2 minutes.
+
+If the demo completes successfully, MANC-Q is installed correctly.
+
+Using MANC-Q from Jupyter Notebook
+
+Jupyter Notebook is not required to install or run MANC-Q. The commands in this README are normally run from Command Prompt or PowerShell.
+
+However, MANC-Q can also be run from a Jupyter Notebook. Once MANC-Q has been installed, prefix terminal commands with !.
+
+For example:
+
+!python -m mancq demo
+
+
+To analyse your own data:
+
+!python -m mancq run "path/to/experiment_folder" "path/to/results" --ref-mm 0.5
+
+
+It is important that Jupyter is using the same Python environment in which MANC-Q was installed. If you receive an error such as:
+
+No module named mancq
+
+
+your notebook is probably using a different Python environment.
+
+Troubleshooting
+
+'python' is not recognized...
+
+Python is not installed or is not available on your PATH. Reinstall Python and make sure Add Python to PATH is selected during installation.
+
+'git' is not recognized...
+
+Git is not installed or is not available on your PATH. Install Git for Windows and then restart Command Prompt or PowerShell.
+
+Could not open requirements file
+
+You are probably not inside the MANC-Q directory. Run:
+
+cd manc-q
+
+
+and then:
+
+python -m pip install -r requirements.txt
+
+
+No module named mancq
+
+MANC-Q has either not been installed correctly, or you are using a different Python environment from the one where it was installed. Check your Python installation with:
+
+python --version
+python -m pip --version
+
+
+If you are using Jupyter, also check which Python your notebook is using:
+
+import sys
+print(sys.executable)
+
+
+Once the installation and demo have completed successfully, continue with Quick start below to analyse your own NMR spectra.
