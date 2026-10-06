@@ -17,9 +17,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -45,20 +45,28 @@ jobs:
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$v" packaging\installer.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
           Compress-Archive -Path dist\MANC-Q -DestinationPath dist\MANC-Q-windows-portable.zip
+          # checksums, so anyone can confirm their download is the file GitHub built
+          Get-FileHash dist\MANC-Q-setup.exe, dist\MANC-Q-windows-portable.zip -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
+            Set-Content -Encoding ascii dist\SHA256SUMS.txt
+          Get-Content dist\SHA256SUMS.txt
 
       - name: Attach to the release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
+          fail_on_unmatched_files: true
           files: |
             dist/MANC-Q-setup.exe
             dist/MANC-Q-windows-portable.zip
+            dist/SHA256SUMS.txt
 
       - name: Keep the files with this run (manual runs)
         if: github.event_name != 'release'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: MANC-Q-windows
           path: |
             dist/MANC-Q-setup.exe
             dist/MANC-Q-windows-portable.zip
+            dist/SHA256SUMS.txt
