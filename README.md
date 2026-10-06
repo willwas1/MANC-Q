@@ -27,7 +27,7 @@ That is all. Sample names are taken from the EXPNO folder names; nothing else is
 Python 3.9 or later.
 
 ```
-git clone https://github.com/<your-account>/manc-q.git
+git clone https://github.com/willwas1/manc-q.git
 cd manc-q
 pip install -r requirements.txt
 ```
