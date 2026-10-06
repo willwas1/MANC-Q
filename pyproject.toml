@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mancq"
+version = "1.0.0"
+description = "MANC-Q: Metabolite Abundance by NMR Curve-fitting, Quantified. 1H NMR metabolite quantification by whole-spectrum fitting of simulated GISSMO spin systems"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "William Smith" }]
+dependencies = ["numpy>=1.23", "scipy>=1.10", "pandas>=1.5", "matplotlib>=3.6", "nmrglue>=0.9", "openpyxl>=3.0"]
+
+[project.scripts]
+mancq = "mancq.__main__:main"
+
+[tool.setuptools]
+packages = ["mancq"]
+
+[tool.setuptools.package-data]
+mancq = ["library/*"]
