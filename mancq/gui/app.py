@@ -34,12 +34,12 @@ from mancq import results as rs
 
 
 ACCENT = "#660099"
-TIER_COL = {"Quantified": "#1d4ed8", "Overlapped (semi-quantitative)": "#d97706",
+TIER_COL = {"Quantified": "#1d4ed8", "Overlapped (semi-quantitative)": "#b45309",
             "Deconvolution estimate (low confidence)": "#9ca3af", "Upper bound only": "#e5e7eb",
             "Not detected": "#ffffff", "Not measurable (region ignored)": "#f3f4f6"}
 TIER_TXT = {"Quantified": "#ffffff", "Overlapped (semi-quantitative)": "#ffffff",
-            "Deconvolution estimate (low confidence)": "#111827", "Upper bound only": "#6b7280",
-            "Not detected": "#9ca3af", "Not measurable (region ignored)": "#9ca3af"}
+            "Deconvolution estimate (low confidence)": "#111827", "Upper bound only": "#374151",
+            "Not detected": "#4b5563", "Not measurable (region ignored)": "#4b5563"}
 MW = {"TSP-d4": 172.27, "DSS-d6": 224.36}
 COMMON_REGIONS = [("Urea", 5.70, 5.85), ("DMSO", 2.69, 2.74), ("Methanol", 3.34, 3.38), ("Acetone", 2.21, 2.24)]
 POLOX_MODES = ["Model it (recommended)", "Ignore", "Not in my samples"]
@@ -556,7 +556,7 @@ class RegionsTab(QWidget):
         b2 = QPushButton("Remove"); b2.clicked.connect(self.remove); hb.addWidget(b2); hb.addStretch()
         lv.addLayout(hb)
         self.info = QLabel(); self.info.setWordWrap(True); self.info.setTextFormat(Qt.RichText)
-        self.info.setStyleSheet("background:#f5f3ff; border:1px solid #ddd6fe; padding:8px;")
+        self.info.setStyleSheet("background:#f5f3ff; color:#1f2937; border:1px solid #ddd6fe; padding:8px;")
         self.info.setAlignment(Qt.AlignTop); self.info.setMinimumHeight(150)
         lv.addWidget(self.info)
         note = QLabel("Metabolites whose peaks all fall inside ignored regions are reported as \"n/m\" (not "
@@ -1289,9 +1289,26 @@ class MainWindow(QMainWindow):
 
 def make_app(argv=None):
     app = QApplication.instance() or QApplication(argv or sys.argv)
+    # Always use a light theme: the plots, tier colours and info boxes are designed for a light background, and
+    # Windows dark mode would otherwise give white text on the light boxes.
+    try:
+        app.styleHints().setColorScheme(Qt.ColorScheme.Light)      # Qt 6.8 and later
+    except Exception:
+        pass
     app.setStyle("Fusion")
     f = QFont(); f.setFamilies(["Segoe UI", "Roboto", "Arial"]); f.setPointSize(10); app.setFont(f)
-    pal = app.palette(); pal.setColor(QPalette.Highlight, QColor(ACCENT)); app.setPalette(pal)
+    pal = QPalette()
+    light = {QPalette.Window: "#f3f4f6", QPalette.WindowText: "#111827", QPalette.Base: "#ffffff",
+             QPalette.AlternateBase: "#f9fafb", QPalette.ToolTipBase: "#ffffff", QPalette.ToolTipText: "#111827",
+             QPalette.PlaceholderText: "#6b7280", QPalette.Text: "#111827", QPalette.Button: "#f9fafb",
+             QPalette.ButtonText: "#111827", QPalette.BrightText: "#b91c1c", QPalette.Link: ACCENT,
+             QPalette.Highlight: ACCENT, QPalette.HighlightedText: "#ffffff", QPalette.Light: "#ffffff",
+             QPalette.Midlight: "#e5e7eb", QPalette.Mid: "#9ca3af", QPalette.Dark: "#6b7280", QPalette.Shadow: "#374151"}
+    for role, col in light.items():
+        pal.setColor(QPalette.All, role, QColor(col))
+    for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
+        pal.setColor(QPalette.Disabled, role, QColor("#6b7280"))
+    app.setPalette(pal)
     return app
 
 

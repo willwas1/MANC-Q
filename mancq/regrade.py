@@ -1,5 +1,6 @@
 """Re-apply the grading rules to a finished run without refitting (seconds instead of minutes per spectrum).
 Uses the fit state cached in <output>/_per_sample/*_fit.npz. Change grading values in SETTINGS first."""
+import json
 import os
 import time
 import numpy as np
@@ -34,13 +35,20 @@ def regrade(out, library_dir=None):
     log(f"regrade  {time.strftime('%Y-%m-%d %H:%M')}   {len(samples)} samples in {out}")
     grades, peaks, obs, qc, lib = [], [], [], [], None
     for smp in samples:
-        d = np.load(os.path.join(per, f"{smp}_fit.npz"), allow_pickle=True)
+        d = np.load(os.path.join(per, f"{smp}_fit.npz"), allow_pickle=False)
+        if "mp_json" in d:
+            mp_list = json.loads(str(d["mp_json"]))
+        else:
+            # results written by MANC-Q 1.1.0 or earlier store this part with Python pickle, which can run code
+            # when loaded; only accept those files from your own runs
+            log(f"  {smp}: older results format; loading it as you created it yourself")
+            mp_list = list(np.load(os.path.join(per, f"{smp}_fit.npz"), allow_pickle=True)["mp"])
         sf = float(d["sf"])
         pl = bool(d["pluronic"]) if "pluronic" in d else True
         slib = q.prepare_library(q.build_library(sf, libdir, os.path.join(out, "_cache")), sf, pl)
         lib = lib or q.prepare_library(q.build_library(sf, libdir, os.path.join(out, "_cache")), sf, True)
         MP = []
-        for m in d["mp"]:
+        for m in mp_list:
             m = dict(m)
             m["p"], m["it"] = np.asarray(m["p"], float), np.asarray(m["it"], float)
             MP.append(m)

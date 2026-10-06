@@ -127,7 +127,7 @@ plt = _plt
 
 from .spinsim import simulate_spin_system, merge_sticks
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -143,6 +143,15 @@ TIMING = {}
 # =============================================================================
 DECONV = "Deconvolution estimate (low confidence)"
 NOTMEAS = "Not measurable (region ignored)"
+
+
+def _json_default(v):
+    """Lets json.dumps write numpy numbers and arrays (used for the saved fit state)."""
+    if isinstance(v, np.ndarray):
+        return v.tolist()
+    if isinstance(v, np.generic):
+        return v.item()
+    raise TypeError(f"cannot save {type(v)}")
 
 
 def read_spectrum(expdir, procno):
@@ -258,7 +267,7 @@ def parse_gissmo(path):
     lib = {}
     for line in open(path):
         line = line.rstrip("\n")
-        if not line:
+        if not line or line.startswith("#"):
             continue
         gid, name, rest = line.split("|", 2)
         p = rest.split("#")
@@ -285,25 +294,28 @@ def build_library(sf, libdir, cache_dir):
     comp = pd.read_csv(os.path.join(libdir, "compounds.csv"))
     sig = hashlib.md5((open(os.path.join(libdir, "compounds.csv")).read() +
                        open(os.path.join(libdir, "gissmo_spin_systems.txt")).read() +
+                       open(os.path.join(libdir, "other_spin_systems.txt")).read() +
                        open(os.path.join(libdir, "peaklists.csv")).read() + __version__).encode()).hexdigest()
     if os.path.exists(cpath):
         d = json.load(open(cpath))
         if d.get("sig") == sig:
             return d["compounds"]
     g = parse_gissmo(os.path.join(libdir, "gissmo_spin_systems.txt"))
+    other = parse_gissmo(os.path.join(libdir, "other_spin_systems.txt"))
     pk = pd.read_csv(os.path.join(libdir, "peaklists.csv"))
     man = pd.read_csv(os.path.join(libdir, "peaklists_manifest.csv")).set_index("metabolite")
     out = []
     for _, r in comp.iterrows():
-        if r.source == "GISSMO":
-            e = g[r.source_id]
+        if r.source in ("GISSMO", "SPIN"):
+            e = g[r.source_id] if r.source == "GISSMO" else other[r.source_id]
             ppm, it, grp = simulate_spin_system(e["shifts"], e["J"], sf, e["hetero"], ANOMER_WEIGHTS.get(r.metabolite))
             ppm, it, grp = merge_sticks(ppm, it, grp)
             keep = it > 2e-3 * it.max()
             ppm, it, grp = ppm[keep], it[keep], grp[keep]
             nprot = len(e["shifts"]) if r.metabolite not in ANOMER_WEIGHTS else len(e["shifts"]) / 2
             it = it * nprot / it.sum()
-            prov = f"GISSMO bmse{r.source_id} ({e['name']}), QM-simulated at {sf:.2f} MHz"
+            prov = (f"GISSMO bmse{r.source_id} ({e['name']}), QM-simulated at {sf:.2f} MHz" if r.source == "GISSMO" else
+                    f"spin system {r.source_id} ({e['name']}, see other_spin_systems.txt), QM-simulated at {sf:.2f} MHz")
         else:
             sub = pk[pk.metabolite == r.source_id]
             ppm = sub.ppm.values * 1.0
@@ -540,7 +552,7 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
     MP = []
     DMAX, DLT, Dk = np.zeros(ncomp), np.zeros(ncomp), np.zeros(ncomp)
     for k, c in enumerate(lib):
-        base = g_off if c["source"] == "GISSMO" else 0.0
+        base = g_off if c["source"] in ("GISSMO", "SPIN") else 0.0
         DMAX[k] = c.get("max_shift_hz", S["MAX_SHIFT_TITRATABLE_HZ"] if c["titratable"] else S["MAX_SHIFT_HZ"]) / sf
         DLT[k] = c.get("multiplet_shift_hz", S["MULTIPLET_SHIFT_TITRATABLE_HZ"] if c["titratable"] else S["MULTIPLET_SHIFT_HZ"]) / sf
         if c["source"] == "polymer":
@@ -1392,8 +1404,9 @@ def _fit_one(smp, d, libdir, out):
                         x=res["grid"].x.astype(np.float32), yv=res["yv"].astype(np.float32),
                         fit=res["fit"].astype(np.float32), base=res["base_fit"].astype(np.float32),
                         dx=res["grid"].dx, sf=sf, amp=res["amp"], se=res["se"], pluronic=pluronic,
-                        mp=np.array([{k: (v.tolist() if isinstance(v, np.ndarray) else v)
-                                      for k, v in m.items()} for m in res["MP"]], dtype=object))
+                        mp_json=np.array(json.dumps([{k: (v.tolist() if isinstance(v, np.ndarray) else v)
+                                                      for k, v in m.items()} for m in res["MP"]],
+                                                     default=_json_default)))
     gr.to_csv(os.path.join(per, f"{smp}_grades.csv"), index=False)
     pk.to_csv(os.path.join(per, f"{smp}_peaks.csv"), index=False)
     ob.to_csv(os.path.join(per, f"{smp}_obs.csv"), index=False)
@@ -1461,7 +1474,7 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         f"Signal is present where the metabolite would appear but it cannot be attributed to it with confidence (no usable reporter, or a multiplet the library predicts >{S['CONTRADICT_MIN_SNR']}x noise is missing). The value is the largest concentration the data allow (upper bound).",
         "Below the detection limit; Report_mM shows <LOD in mM. 'n/m' = not measurable: every peak of the metabolite lies in a region left out of the fit.",
         "Standard error from the least-squares fit only (noise + local misfit). Excludes library, relaxation (T1) and TSP weighing errors.",
-        f"{sum(c['source']=='GISSMO' for c in lib)} GISSMO spin systems (BMRB, QM-simulated at the spectrometer frequency) + {sum(c['source']=='CASMDB' for c in lib)} fixed peak lists (CASMDB) + optional Pluronic F-68 terms. See Library sheet.",
+        f"{sum(c['source']=='GISSMO' for c in lib)} GISSMO spin systems (BMRB, QM-simulated at the spectrometer frequency) + {sum(c['source']=='SPIN' for c in lib)} other spin system(s) simulated the same way + {sum(c['source']=='CASMDB' for c in lib)} fixed peak lists (CASMDB) + optional Pluronic F-68 terms. See Library sheet.",
         "Every multiplet of every metabolite in every sample: fitted centre, range, line positions and relative intensities, protons, linewidth, shift from library, dominance, misfit, concentration from that multiplet alone, and whether it was used as a reporter.",
         "Peaks picked in the observed spectrum (>10 x noise) with the fitted contributors at each apex (the peak assignment list).",
         "Per-sample referencing, linewidth, noise, fit quality and fraction of signal explained.",
@@ -1569,7 +1582,7 @@ def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, progress=No
     _, _, sf, _ = read_spectrum(d0, p0)
     log(f"Library at {sf:.3f} MHz ...")
     lib = prepare_library(build_library(sf, libdir, os.path.join(out, "_cache")), sf, S["PLURONIC"] in ("auto", "yes"))
-    log(f"  {sum(c['source']=='GISSMO' for c in lib)} GISSMO spin systems, "
+    log(f"  {sum(c['source']=='GISSMO' for c in lib)} GISSMO spin systems, {sum(c['source']=='SPIN' for c in lib)} other spin systems, "
         f"{sum(c['source']=='CASMDB' for c in lib)} peak lists, {sum(c['source']=='polymer' for c in lib)} polymer terms")
     nw = S["N_WORKERS"] or max(1, min(len(samples), (os.cpu_count() or 2) - 1))
     nw = max(1, min(nw, len(samples)))

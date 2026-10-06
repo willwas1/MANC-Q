@@ -2,10 +2,25 @@
 
 **M**etabolite **A**bundance by **N**MR **C**urve-fitting, **Q**uantified. Developed at the University of Manchester.
 
-MANC-Q measures metabolite concentrations (mM) in 1D ¹H NMR spectra. It fits the whole spectrum with simulated
-spectra of known compounds and uses the TSP or DSS peak as the concentration reference. No spiked standards
-and no calibration curves are needed. Every result carries a confidence tier, so it is clear which numbers are
-measurements and which are estimates.
+MANC-Q measures metabolite concentrations (mM) in 1D ¹H NMR spectra, using only the TSP or DSS internal
+standard. No spiked standards and no calibration curves are needed.
+
+### How it works
+
+1. **A library built on GISSMO.** Each metabolite is described by its spin system: the chemical shift of every
+   proton and the J couplings between them. For 123 of the 149 compounds these come from
+   [GISSMO](https://gissmo.bmrb.io) (Guided Ideographic Spin System Model Optimization; Dashti et al. 2017),
+   a BMRB database of spin systems fitted to measured spectra of the pure compounds. The other 26 use peak
+   lists or literature shifts (listed in `mancq/library`).
+2. **Simulated at your field.** Each spin system is simulated quantum-mechanically at your spectrometer's
+   frequency, so multiplet shapes, including second-order effects, are right at 400, 600 or 800 MHz.
+3. **Whole-spectrum fit.** Your spectrum is fitted as the sum of these simulated spectra plus a smooth
+   baseline. Each compound may move a few hertz and broaden slightly, to allow for pH and sample matrix.
+4. **Concentration from the reference.** The fitted amount of each compound is converted to mM by comparing
+   it, proton for proton, with the TSP or DSS peak of known concentration.
+5. **A confidence tier for every value.** Each result is graded by how well its signals are resolved and fitted
+   (Quantified, Overlapped, Estimate, Upper bound, Not detected), so it is clear which numbers are measurements
+   and which are estimates.
 
 ![MANC-Q results screen](docs/images/6_results.png)
 
@@ -37,6 +52,26 @@ on the computer and no administrator rights are needed. It then puts a MANC-Q sh
 that, MANC-Q opens in a few seconds. To remove it, delete the folder and the shortcut.
 
 If Windows says "Windows protected your PC", click **More info**, then **Run anyway**.
+
+### If your organisation's PC blocks both
+
+Managed PCs (for example university computers) may refuse to run programs IT has not approved, with a message
+such as "This app has been blocked by your system administrator". If the PC already has **Anaconda**, use that:
+
+1. Download and extract the folder as in Option 2.
+2. Open **Anaconda Prompt** from the Start menu (type "anaconda prompt").
+3. Paste these lines one at a time, pressing Enter after each. Change the path in the first line to where you
+   extracted MANC-Q.
+
+```
+cd /d "C:\path\to\MANC-Q"
+python -m pip install -e . --no-deps
+python -m pip install nmrglue
+python -m mancq
+```
+
+`--no-deps` stops pip from trying to replace Anaconda's own copies of numpy, PySide6 and the others. Next time,
+open Anaconda Prompt and run only the first and last lines. Otherwise, ask your IT team to approve MANC-Q.
 
 ## Your first analysis
 
@@ -101,6 +136,19 @@ measured spectrum, the fit and each compound's contribution.
 To ask for help, open an [issue](https://github.com/willwas1/MANC-Q/issues) with a screenshot of the error and,
 if there is one, the `run_log.txt` file from the results folder.
 
+## Is it safe?
+
+* MANC-Q runs entirely on your computer. Spectra and results are never sent anywhere. The only internet use is
+  the one-off set-up by MANC-Q.bat, which downloads uv and a standard build of Python (both from the uv project on GitHub)
+  and the packages listed in `constraints.txt` (from PyPI, the Python package index).
+* The installer is not code-signed, which is why Windows warns about it. Download it only from this repository's
+  Releases page, not from copies passed around. Each release has a `SHA256SUMS.txt`; to check a download, open a
+  Command Prompt in your Downloads folder and run `certutil -hashfile MANC-Q-setup.exe SHA256`, then compare the
+  result with the file.
+* The code is open (MIT licence): anyone can read exactly what it does. It comes with no warranty.
+* It is a research tool. Its results have not been validated for clinical, diagnostic or GMP release decisions.
+  Read every value with its confidence tier and check the overlay for any value you rely on.
+
 ## For Python users
 
 The same program can be used from the command line, from scripts and from notebooks; see
@@ -118,7 +166,7 @@ The same program can be used from the command line, from scripts and from notebo
 ### Building the Windows installer
 
 You normally do not need to: publishing a release on GitHub (Releases > Draft a new release > choose a tag such
-as `v1.1.0` > Publish) starts `.github/workflows/build-windows.yml`, which builds `MANC-Q-setup.exe` and a portable
+as `v1.2.0` > Publish) starts `.github/workflows/build-windows.yml`, which builds `MANC-Q-setup.exe` and a portable
 zip on GitHub's computers, tests them, and attaches them to the release (about 15 minutes; progress is on the
 Actions tab). To build on your own PC instead, run `packaging\build_windows.bat`.
 
@@ -140,7 +188,7 @@ Actions tab). To build on your own PC instead, run `packaging\build_windows.bat`
   mancq.run("experiment_folder", "results", ref_mm=0.5, dilution=1.0)
   ```
 
-## How it works, briefly
+## How it works, in more detail
 
 1. The reference singlet at 0 ppm is fitted (pseudo-Voigt plus ²⁹Si satellites). It sets the ppm scale, the
    starting linewidth and the concentration scale:
@@ -174,7 +222,7 @@ Actions tab). To build on your own PC instead, run `packaging\build_windows.bat`
 value you rely on, or process the FIDs in TopSpin.
 * Not corrected: incomplete T1 relaxation (use a long enough recycle delay), weighing error of the reference,
   and reference binding to proteins (serum and plasma need ultrafiltration or an ERETIC-type reference).
-* The 26 compounds described by fixed peak lists (see `library/peaklists_manifest.csv`) are exact only near
+* The 25 compounds described by fixed peak lists (see `library/peaklists_manifest.csv`) are exact only near
   800 MHz; at other fields their line spacing is rescaled with a first-order approximation.
 * Overlapped and Deconvolution-tier values are sensitive to small numerical differences and can shift by 10 % or
   more between runs on different machines; Quantified values are stable to about 3 %.
@@ -185,8 +233,10 @@ value you rely on, or process the FIDs in TopSpin.
 
 * `gissmo_spin_systems.txt`: spin-system parameters from GISSMO / BMRB (<https://gissmo.bmrb.io>). Please cite
   Dashti H. et al., *Anal. Chem.* 2017, 89, 12201-12208, and BMRB.
-* `peaklists.csv`: fixed peak lists for 26 compounds taken from CASMDB, which itself draws on HMDB, BMRB and
-  SDBS spectra (the origin of each is in `peaklists_manifest.csv`). These sources have their own terms of use.
+* `peaklists.csv`: fixed peak lists for 25 compounds taken from CASMDB, which itself draws on HMDB and BMRB
+  spectra (the origin of each is in `peaklists_manifest.csv`). These sources have their own terms of use.
+* `other_spin_systems.txt`: spin systems for compounds with no GISSMO entry, written from published chemical
+  shifts (currently dimethyl sulfoxide, from Gottlieb et al., *J. Org. Chem.* 1997, 62, 7512-7515).
 
 ## Citation
 

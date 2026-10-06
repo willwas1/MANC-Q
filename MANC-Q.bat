@@ -55,7 +55,7 @@ echo  [3/3] Installing MANC-Q and the packages it uses...
 copy /b "pyproject.toml"+"constraints.txt" "%RT%\installed_stamp.txt" >nul
 
 REM A shortcut on the desktop, so next time you do not need to find this folder.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop')+'\MANC-Q.lnk'); $s.TargetPath='%~f0'; $s.WorkingDirectory='%~dp0'; $s.Save()" >nul 2>&1 && echo  A MANC-Q shortcut has been put on your desktop.
+powershell -NoProfile -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop')+'\MANC-Q.lnk'); $s.TargetPath='%~f0'; $s.WorkingDirectory='%~dp0'; $s.Save()" >nul 2>&1 && echo  A MANC-Q shortcut has been put on your desktop.
 echo  Set-up finished.
 echo.
 
