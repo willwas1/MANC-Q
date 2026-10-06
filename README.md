@@ -2,99 +2,127 @@
 
 **M**etabolite **A**bundance by **N**MR **C**urve-fitting, **Q**uantified. Developed at the University of Manchester.
 
-Absolute quantification of metabolites in 1D ¹H NMR spectra by fitting the whole spectrum with simulated
-compound spectra.
+MANC-Q measures metabolite concentrations (mM) in 1D ¹H NMR spectra. It fits the whole spectrum with simulated
+spectra of known compounds and uses the TSP or DSS peak as the concentration reference. No spiked standards
+and no calibration curves are needed. Every result carries a confidence tier, so it is clear which numbers are
+measurements and which are estimates.
 
-Every compound in the library is described by its GISSMO spin system (chemical shifts and J couplings, from
-BMRB). The program simulates each one exactly at the field of your spectrometer, so multiplet shapes are
-correct at 400, 600 or 800 MHz, including second-order patterns. It then finds the set of amounts that best
-reproduces the measured spectrum, allowing each compound and each multiplet a few hertz of shift and some
-linewidth freedom. Amounts are converted to mM using only the internal standard (TSP or DSS). No spiked
-standards and no calibration against other samples are needed.
+![MANC-Q results screen](docs/images/6_results.png)
 
-Every result carries a confidence tier, so it is clear which numbers are measurements and which are estimates.
+## Get started on Windows
 
-## What you need
+You do not need Python or anything else installed. Pick one of these.
 
-* Bruker processed 1D ¹H spectra (phased and baseline-corrected in TopSpin): `<EXPNO>/pdata/1/1r` and `procs`.
-* A TSP or DSS internal standard of known concentration in the NMR tube.
-* Optionally, the dilution from your original sample to the tube, if you want concentrations in the original sample.
+### Option 1: the installer (simplest)
 
-That is all. Sample names are taken from the EXPNO folder names; nothing else is read from the acquisition.
+1. Open the [Releases page](https://github.com/willwas1/MANC-Q/releases) and download **MANC-Q-setup.exe**.
+2. Double-click it and follow the steps. No administrator rights are needed.
+3. Start **MANC-Q** from the Start menu.
 
-## Install
+Windows may say "Windows protected your PC" because the installer is not signed. Click **More info**, then
+**Run anyway**.
 
-Python 3.9 or later.
+### Option 2: download the folder and double-click
+
+Use this if there is no installer on the Releases page yet, or if you want the Python code as well.
+
+1. On this page, click the green **Code** button, then **Download ZIP**.
+2. In your Downloads folder, right-click the ZIP file and choose **Extract All**. Put the folder somewhere easy
+   to find, such as Documents.
+3. Open the extracted **MANC-Q** folder and double-click **MANC-Q.bat**.
+
+The first time, a black window shows the set-up: it downloads a private copy of Python and the packages MANC-Q
+needs into the MANC-Q folder (about 5 minutes and 650 MB; it needs internet). Nothing is installed anywhere else
+on the computer and no administrator rights are needed. It then puts a MANC-Q shortcut on your desktop. After
+that, MANC-Q opens in a few seconds. To remove it, delete the folder and the shortcut.
+
+If Windows says "Windows protected your PC", click **More info**, then **Run anyway**.
+
+## Your first analysis
+
+MANC-Q opens on the first of six tabs. The full guide with pictures is in
+[docs/QUICKSTART_GUI.md](docs/QUICKSTART_GUI.md).
+
+1. **Spectra.** Click **Try the demo** the first time: it makes two synthetic spectra with known
+   concentrations, so you can practise. For your own data, click **Browse** and choose the TopSpin dataset
+   folder (the folder that contains the numbered experiment folders such as `10`, `11`, `12`).
+2. **Process FIDs.** Only appears if some experiments have not been processed in TopSpin. Check the phasing.
+3. **Regions.** Parts of the spectrum to leave out. The defaults suit most cell-culture samples.
+4. **Settings.** Type the concentration of TSP (or DSS) in the NMR tube, and the dilution if you want
+   concentrations in the original sample.
+5. **Run.** Click **Start**. Each spectrum takes 1 to 5 minutes.
+6. **Results.** A table of metabolites by samples. Click any value to see the fit it came from.
+   **Open Excel workbook** gives every table.
+
+## What your data needs to be
+
+* **Bruker** 1D ¹H experiments. Either processed in TopSpin (each experiment folder contains `pdata/1/1r`), or
+  raw FIDs (`fid` and `acqus`), which MANC-Q processes itself.
+* A **TSP or DSS** internal standard of known concentration in the tube.
 
 ```
-git clone https://github.com/willwas1/manc-q.git
-cd manc-q
-pip install -r requirements.txt
+MyExperiment            <- choose this folder
+├── 10
+│   ├── fid, acqus ...
+│   └── pdata/1/1r, procs
+├── 11
+└── 12
 ```
 
-Or install it as a command: `pip install .` (this gives you the `mancq` command in place of `python -m mancq`).
+Other vendors' formats are not supported yet.
 
-## Quick start
+## Reading the results
 
-Check that everything works: this makes a synthetic 600 MHz spectrum of 18 metabolites at known
-concentrations, quantifies it, and prints the recovered values next to the true ones (about 2 minutes).
+The main file is `metabolite_concentrations.xlsx` in the results folder. Its `README` sheet explains every
+sheet. Each value has a confidence tier:
 
-```
-python -m mancq demo
-```
-
-Quantify your own spectra:
-
-```
-python -m mancq run  path/to/experiment_folder  path/to/results  --ref-mm 0.5
-```
-
-`experiment_folder` is the TopSpin dataset folder containing the numbered EXPNO folders; a single EXPNO folder
-also works. `--ref-mm` is the TSP/DSS concentration in the tube.
-
-Optional settings:
-
-| Option | Meaning |
-|---|---|
-| `--dilution 5` | multiply every result by this factor (sample-to-tube dilution); default 1 = mM in the tube |
-| `--dilution-file dil.csv` | per-sample factors, CSV with columns `sample,dilution` (see `examples/`) |
-| `--reference DSS` | label the reference as DSS instead of TSP (the fit is the same) |
-| `--procno 2` | read `pdata/2` instead of `pdata/1` |
-| `--samples 10 11 12` | only these EXPNOs |
-| `--exclude 5.5 6.5` | leave an extra region out of the fit (repeatable); water 4.60-5.00 ppm is always excluded |
-| `--pluronic yes/no` | model Pluronic F-68 (a surfactant in many cell-culture media); default: detected automatically |
-| `--no-overlays` | skip the overlay PDFs |
-| `--workers 4` | number of spectra fitted in parallel |
-
-A fit takes roughly 1 to 5 minutes per spectrum on one core. Runs resume: if you stop a run and start it again,
-finished spectra are reused.
-
-## Output
-
-In the results folder:
-
-* `metabolite_concentrations.xlsx`: start here. The `README` sheet explains everything; `Report_mM` has one
-  row per metabolite and one column per sample, each value written according to its tier (see below).
-* `overlay_sample_<EXPNO>.pdf`: the measured spectrum, the fitted model and each compound's contribution, in
-  17 windows. Look here first whenever a number is surprising.
-* `concentrations_long.csv`, `peak_list_by_metabolite.csv`, `observed_peaks_assigned.csv`, `qc_per_sample.csv`:
-  the same results as plain tables.
-* `run_log.txt`: what was done to each spectrum.
-
-### Confidence tiers
-
-| Tier | Meaning | In `Report_mM` |
+| Tier | What it means | Shown as |
 |---|---|---|
-| Quantified | at least one of the compound's multiplets is resolved: strong, mostly this compound, fitted well | number |
-| Overlapped (semi-quantitative) | the best multiplet is shared with other compounds | number |
-| Deconvolution estimate | no multiplet is resolved; the value comes from the whole-compound fit and is well determined | `~number` |
-| Upper bound only | signal is present where the compound would be, but cannot be attributed to it | `<=number` |
+| Quantified | at least one of the compound's signals is clean and well fitted; treat it as a measurement | a number |
+| Overlapped | its best signal is shared with other compounds; semi-quantitative, good for trends | a number |
+| Deconvolution estimate | no clean signal; estimated from the fit of the whole compound | `~number` |
+| Upper bound only | something is there, but it cannot be attributed to this compound | `<=number` |
 | Not detected | below 3 x noise | `<LOD` |
+| Not measurable | all its peaks are in a region you chose to leave out | `n/m` |
 
-The tier is decided per spectrum. Read the tiers along with the numbers: a compound "fitted at 1 mM" in the
-Upper bound tier has not been measured at 1 mM.
+Always read the tier with the number. "1.2 mM, Quantified" is a measurement; "<=1.2 mM, Upper bound" only says
+it is not more than 1.2 mM. When a value looks surprising, open `overlay_sample_<EXPNO>.pdf`, which shows the
+measured spectrum, the fit and each compound's contribution.
 
-## Changing things
+## If something goes wrong
+
+| Problem | What to do |
+|---|---|
+| MANC-Q.bat says the download failed | Check the internet connection. University and company firewalls sometimes block the download; try another network once, or use the installer (Option 1). Running MANC-Q.bat again carries on where it stopped. |
+| "This file must stay inside the MANC-Q folder" | You opened MANC-Q.bat from inside the ZIP. Extract the ZIP first (right-click, Extract All). |
+| No experiments are listed | Choose the folder that contains the numbered experiment folders, not an experiment folder or a single file. |
+| Results look wrong | Check the TSP/DSS concentration, the phasing (tab 2, or in TopSpin) and the overlay PDF for that sample. |
+
+To ask for help, open an [issue](https://github.com/willwas1/MANC-Q/issues) with a screenshot of the error and,
+if there is one, the `run_log.txt` file from the results folder.
+
+## For Python users
+
+The same program can be used from the command line, from scripts and from notebooks; see
+[docs/COMMAND_LINE.md](docs/COMMAND_LINE.md).
+
+* With Python 3.9 or later: `pip install git+https://github.com/willwas1/MANC-Q.git`, then `mancq` (opens the
+  window) or `mancq --help`.
+* On a Mac or Linux without Python: install uv (`curl -LsSf https://astral.sh/uv/install.sh | sh`), then run
+  `uvx --python 3.12 --from git+https://github.com/willwas1/MANC-Q mancq`. MANC-Q is developed and tested on
+  Windows; other systems should work but are less tested.
+* `constraints.txt` lists the exact package versions MANC-Q was tested with. Small numerical differences between
+  package versions can move Overlapped and Deconvolution values; use
+  `pip install . -c constraints.txt` if you need identical numbers to someone else.
+
+### Building the Windows installer
+
+You normally do not need to: publishing a release on GitHub (Releases > Draft a new release > choose a tag such
+as `v1.1.0` > Publish) starts `.github/workflows/build-windows.yml`, which builds `MANC-Q-setup.exe` and a portable
+zip on GitHub's computers, tests them, and attaches them to the release (about 15 minutes; progress is on the
+Actions tab). To build on your own PC instead, run `packaging\build_windows.bat`.
+
+## Changing the fitting (for developers)
 
 * **Fit and grading settings** are in the `SETTINGS` block at the top of `mancq/engine.py`, each with a comment.
 * **Re-grade without refitting**: after changing grading settings, run
@@ -139,6 +167,11 @@ Upper bound tier has not been measured at 1 mM.
   because a look-alike compound takes part of the singlet. Check the overlays for singlet-only compounds.
 * Crowded regions (branched-chain amino acid methyls, 2.0 to 2.5 ppm) are handled, but values there are more
   often Overlapped than Quantified.
+* Phasing matters. The same FIDs processed by MANC-Q (automatic phasing) and by TopSpin gave the same
+  concentrations on the median (ratio 1.00), and the MANC-Q-phased spectra fitted slightly better, but a 1 to 3
+  degree difference in zero-order phase moved a few individual values by 10 to 30 % (for example choline, and
+  glucose in one spectrum). Check the phasing (tab 2 of the window shows it before the run; from the command line, look at the overlays) for any
+value you rely on, or process the FIDs in TopSpin.
 * Not corrected: incomplete T1 relaxation (use a long enough recycle delay), weighing error of the reference,
   and reference binding to proteins (serum and plasma need ultrafiltration or an ERETIC-type reference).
 * The 26 compounds described by fixed peak lists (see `library/peaklists_manifest.csv`) are exact only near

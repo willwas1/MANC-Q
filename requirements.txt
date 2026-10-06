@@ -4,3 +4,4 @@ pandas>=1.5
 matplotlib>=3.6
 nmrglue>=0.9
 openpyxl>=3.0
+PySide6-Essentials>=6.5
