@@ -385,4 +385,309 @@ If you regularly analyse data, this can be turned into a **one-click Windows lau
 
 A typical spectrum takes approximately:
 
-**1–5**
+**1–5 minutes per spectrum on one CPU core.**
+
+For example, 20 spectra could take considerably longer than a single spectrum.
+
+MANC-Q can process multiple spectra in parallel if you increase the number of workers.
+
+For example:
+
+```text
+--workers 4
+```
+
+means that up to four spectra can be processed at the same time.
+
+If you are not comfortable with computer settings, you can simply leave this option alone.
+
+---
+
+# Where are my results?
+
+After MANC-Q finishes, look inside the results folder you specified.
+
+You should find files including:
+
+### `metabolite_concentrations.xlsx`
+
+This is the main results file.
+
+Open it using:
+
+* Microsoft Excel
+* LibreOffice Calc
+* Another program capable of opening `.xlsx` files
+
+The workbook contains a `README` sheet explaining the results.
+
+---
+
+# Understanding the results
+
+MANC-Q gives each result a confidence category.
+
+## Quantified
+
+This is the strongest result category.
+
+The metabolite has at least one clearly resolved signal that fits well.
+
+The reported concentration can generally be treated as a measured value.
+
+---
+
+## Overlapped
+
+The metabolite signal overlaps with signals from other compounds.
+
+The result is therefore **semi-quantitative**.
+
+Use more caution when interpreting these values.
+
+---
+
+## Deconvolution estimate
+
+The software could not find a clean, isolated signal for the compound.
+
+Instead, the concentration was estimated from the overall spectrum.
+
+These values should be treated as estimates rather than direct measurements.
+
+---
+
+## Upper bound only
+
+The software sees a signal in the area where the metabolite could be present, but cannot confidently determine how much of that signal belongs to the metabolite.
+
+The result is therefore an **upper limit**, rather than a measured concentration.
+
+---
+
+## Not detected
+
+The metabolite was not detected above the software's detection threshold.
+
+The results table will show:
+
+```text
+<LOD
+```
+
+---
+
+# Very important: don't look only at the number
+
+A result such as:
+
+```text
+1.2 mM
+```
+
+does not tell the whole story.
+
+Always look at the confidence category as well.
+
+For example:
+
+```text
+Quantified       1.2 mM
+```
+
+is very different from:
+
+```text
+Upper bound      <=1.2 mM
+```
+
+The second result does **not** mean that the sample contains exactly 1.2 mM.
+
+---
+
+# Checking a surprising result
+
+MANC-Q creates PDF files called:
+
+```text
+overlay_sample_<EXPNO>.pdf
+```
+
+These show:
+
+* The measured NMR spectrum
+* The fitted spectrum
+* Individual compound contributions
+
+If a result looks surprising, these PDF files are a good place to investigate what happened.
+
+---
+
+# If you stop the program
+
+Don't panic.
+
+MANC-Q is designed so that completed spectra can be reused.
+
+If you stop a run and start it again, finished spectra do not normally need to be processed again.
+
+---
+
+# Optional settings
+
+MANC-Q has additional options for experienced users.
+
+| Option               | What it does                                  |
+| -------------------- | --------------------------------------------- |
+| `--dilution 5`       | Corrects results for sample dilution          |
+| `--reference DSS`    | Uses DSS as the reference label               |
+| `--procno 2`         | Uses processed data in `pdata/2`              |
+| `--samples 10 11 12` | Analyses only selected EXPNOs                 |
+| `--exclude 5.5 6.5`  | Excludes an additional region of the spectrum |
+| `--pluronic yes/no`  | Controls Pluronic F-68 modelling              |
+| `--no-overlays`      | Does not create overlay PDFs                  |
+| `--workers 4`        | Processes several spectra simultaneously      |
+
+If you are new to MANC-Q, you can ignore these options initially.
+
+---
+
+# Common problems
+
+## "python is not recognised"
+
+Python is either not installed or was not added to Windows PATH.
+
+Reinstall Python and make sure you select:
+
+**Add Python to PATH**
+
+during installation.
+
+---
+
+## "pip is not recognised"
+
+Instead of using:
+
+```text
+pip install ...
+```
+
+use:
+
+```text
+python -m pip install ...
+```
+
+---
+
+## The program cannot find my NMR data
+
+Make sure you select the **Bruker experiment folder**, rather than an individual file.
+
+MANC-Q expects the normal Bruker folder structure containing the EXPNO folders.
+
+---
+
+## My results don't look correct
+
+First check:
+
+1. The NMR spectrum has been correctly phased.
+2. The baseline has been corrected.
+3. The TSP/DSS concentration is correct.
+4. The correct experiment folder was selected.
+5. The overlay PDF for the sample.
+
+Remember that some metabolites naturally have less reliable results because their NMR signals overlap with other compounds.
+
+---
+
+# Important limitations
+
+MANC-Q is designed primarily for **cell-culture media and similar aqueous samples**.
+
+Results can be affected by:
+
+* Overlapping metabolite signals
+* Changes in chemical shifts
+* pH
+* Matrix effects
+* Incomplete T1 relaxation
+* Errors in the internal-standard concentration
+* Binding of the reference compound to proteins
+* Differences between spectrometer frequencies
+
+Some metabolites cannot always be separated reliably when they have very similar or identical signals.
+
+Always consider the confidence tier and inspect the overlay when interpreting an unexpected result.
+
+---
+
+# I don't know anything about Python. Can I still use MANC-Q?
+
+**Yes.**
+
+You do not need to learn Python programming.
+
+Python is simply the software environment that MANC-Q uses behind the scenes.
+
+Once MANC-Q has been installed, you can set up a Windows shortcut or launcher so that the process is much easier.
+
+If you are setting MANC-Q up for routine laboratory use, it is recommended to create a simple launcher specifically for your laboratory's folder structure.
+
+---
+
+# Getting help
+
+If something does not work:
+
+1. Take a screenshot of the error message.
+2. Note which step you were doing.
+3. Note which version of Windows and Python you are using.
+4. If possible, include the `run_log.txt` file produced by MANC-Q.
+
+The MANC-Q project is available here:
+
+https://github.com/willwas1/MANC-Q
+
+---
+
+# Citation
+
+If you use MANC-Q in research, please follow the citation information provided in the repository's `CITATION.cff` file.
+
+MANC-Q was developed at the University of Manchester.
+
+---
+
+# Quick reference
+
+### Install
+
+```text
+python -m pip install -r requirements.txt
+```
+
+### Test
+
+```text
+python -m mancq demo
+```
+
+### Analyse NMR data
+
+```text
+python -m mancq run "NMR_DATA_FOLDER" "RESULTS_FOLDER" --ref-mm 0.5
+```
+
+### Main result
+
+```text
+metabolite_concentrations.xlsx
+```
+
+### Remember
+
+**Always check the confidence tier alongside the concentration.**
