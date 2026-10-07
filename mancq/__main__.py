@@ -5,6 +5,7 @@
     python -m mancq demo [<output folder>]
     python -m mancq regrade <output folder>
     python -m mancq gui
+    python -m mancq shortcut      (Windows: put a MANC-Q shortcut on the desktop)
 """
 import argparse
 import sys
@@ -46,6 +47,8 @@ def main(argv=None):
 
     sub.add_parser("gui", help="open the window (the same as running mancq with no arguments)")
 
+    sub.add_parser("shortcut", help="Windows: put a MANC-Q shortcut on the desktop that uses this Python")
+
     g = sub.add_parser("regrade", help="re-apply grading rules to a finished run without refitting")
     g.add_argument("output", help="output folder of an earlier run")
 
@@ -78,8 +81,19 @@ def main(argv=None):
                   "  Or install it with:  python -m pip install PySide6\n"
                   "The command line works without it; see:  python -m mancq --help")
             return 1
-        from .gui.app import main as gui_main
-        return gui_main()
+        try:
+            from .gui.app import main as gui_main
+            return gui_main()
+        except Exception:
+            if sys.stdout is None and sys.platform == "win32":   # started from a shortcut: no console to show errors
+                import ctypes
+                import traceback
+                ctypes.windll.user32.MessageBoxW(None, "MANC-Q could not start:\n\n" + traceback.format_exc()[-1500:],
+                                                 "MANC-Q", 0x10)
+            raise
+    elif a.cmd == "shortcut":
+        from .shortcut import make_shortcut
+        return make_shortcut()
     elif a.cmd == "regrade":
         from .regrade import regrade
         regrade(a.output)

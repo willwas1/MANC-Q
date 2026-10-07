@@ -58,7 +58,8 @@ def open_path(path):
 
 def heading(text, sub=None):
     box = QWidget(); v = QVBoxLayout(box); v.setContentsMargins(0, 0, 0, 6)
-    t = QLabel(text); t.setStyleSheet("font-size: 16px; font-weight: 600;"); v.addWidget(t)
+    t = QLabel(text); t.setStyleSheet("font-size: 16px; font-weight: 600;"); t.setObjectName("step_heading")
+    v.addWidget(t)
     if sub:
         s = QLabel(sub); s.setStyleSheet("color: #4b5563;"); s.setWordWrap(True); v.addWidget(s)
     return box
@@ -1204,6 +1205,7 @@ class MainWindow(QMainWindow):
                        (self.run_tab, "5  Run"), (self.results_tab, "6  Results")]:
             self.tabs.addTab(w, lab)
         self.tabs.setTabVisible(1, False)
+        self.renumber_steps()
         self.tabs.currentChanged.connect(self.tab_changed)
         self.setCentralWidget(self.tabs)
         sb = QStatusBar()
@@ -1215,6 +1217,20 @@ class MainWindow(QMainWindow):
     def spectra_changed(self):
         has_fid = any(s["selected"] and not s["processed"] for s in self.spectra)
         self.tabs.setTabVisible(1, has_fid)
+        self.renumber_steps()
+
+    def renumber_steps(self):
+        """Number the visible steps 1, 2, 3... (the Process FIDs step is only shown when there are raw FIDs)."""
+        import re
+        n = 0
+        for i in range(self.tabs.count()):
+            if not self.tabs.isTabVisible(i):
+                continue
+            n += 1
+            self.tabs.setTabText(i, re.sub(r"^\d+", str(n), self.tabs.tabText(i)))
+            lab = self.tabs.widget(i).findChild(QLabel, "step_heading")
+            if lab is not None:
+                lab.setText(re.sub(r"^\d+", str(n), lab.text()))
 
     def tab_changed(self, i):
         w = self.tabs.widget(i)

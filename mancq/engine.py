@@ -127,7 +127,7 @@ plt = _plt
 
 from .spinsim import simulate_spin_system, merge_sticks
 
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -1462,9 +1462,10 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
     conc, report, tier, se, lod = conc.loc[idx], report.loc[idx], tier.loc[idx], se.loc[idx], lod.loc[idx]
 
     readme = pd.DataFrame(dict(item=[
-        "Units", "Reference", "How numbers are produced", "Quantified", "Overlapped (semi-quantitative)",
+        "Software", "Units", "Reference", "How numbers are produced", "Quantified", "Overlapped (semi-quantitative)",
         DECONV, "Upper bound only", "Not detected", "SE", "Library", "Peak_list_by_metabolite",
         "Observed_peaks_assigned", "QC", "Settings"], text=[
+        f"MANC-Q {__version__} (https://github.com/willwas1/MANC-Q), results written {time.strftime('%Y-%m-%d %H:%M')}.",
         "mM in the original medium = tube mM x dilution factor (from the dilution file).",
         f"{S['REFERENCE']} internal standard only: {S['TSP_MM_IN_TUBE']} mM in tube, 9 H, area from a pseudo-Voigt fit incl. 29Si satellites. No calibration against any sample or standard.",
         "Whole spectrum fitted as a sum of simulated metabolite spectra + smooth baseline + free unassigned singlets; each multiplet has a small fitted shift and linewidth. Concentration = mean of the cleanly resolved 'reporter' multiplets (each fitted on its own); if none, the whole-compound fit.",
@@ -1572,7 +1573,7 @@ def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, progress=No
                     f"check its overlay")
     S["SAMPLE_DIRS"] = sd
     os.makedirs(os.path.join(out, "_per_sample"), exist_ok=True)
-    json.dump({k: v for k, v in S.items() if k != "OVERLAY_REGIONS"},
+    json.dump(dict({k: v for k, v in S.items() if k != "OVERLAY_REGIONS"}, MANCQ_VERSION=__version__),
               open(os.path.join(out, "_per_sample", "run_settings.json"), "w"), indent=1, default=str)
     log(f"MANC-Q {__version__}   {time.strftime('%Y-%m-%d %H:%M')}\nData: {S['DATA_DIR']}\n"
         f"Samples ({len(samples)}): {samples}\nReference: {S['REFERENCE']} {S['TSP_MM_IN_TUBE']} mM in tube\n"

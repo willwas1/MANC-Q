@@ -51,6 +51,12 @@ Optional settings:
 A fit takes roughly 1 to 5 minutes per spectrum on one core. Runs resume: if you stop a run and start it again,
 finished spectra are reused.
 
+Put a desktop shortcut (Windows) that opens the window with the Python you ran this from:
+
+```
+mancq shortcut
+```
+
 Re-grade a finished run after changing grading settings (seconds rather than minutes per spectrum):
 
 ```

@@ -53,25 +53,38 @@ that, MANC-Q opens in a few seconds. To remove it, delete the folder and the sho
 
 If Windows says "Windows protected your PC", click **More info**, then **Run anyway**.
 
-### If your organisation's PC blocks both
+### If your organisation's PC blocks both (university PCs)
 
-Managed PCs (for example university computers) may refuse to run programs IT has not approved, with a message
-such as "This app has been blocked by your system administrator". If the PC already has **Anaconda**, use that:
+Managed PCs may refuse to run programs IT has not approved ("This app has been blocked by your system
+administrator", or nothing happens). Use Anaconda instead, which IT has already approved. If it is not on the
+PC, install it from the university's software centre first (on Windows: Start menu, "Software Center").
 
-1. Download and extract the folder as in Option 2.
-2. Open **Anaconda Prompt** from the Start menu (type "anaconda prompt").
-3. Paste these lines one at a time, pressing Enter after each. Change the path in the first line to where you
-   extracted MANC-Q.
+1. Open **Anaconda Prompt** from the Start menu (type "anaconda prompt").
+2. Paste these two lines, one at a time, pressing Enter after each (the first takes a minute or two):
 
 ```
-cd /d "C:\path\to\MANC-Q"
-python -m pip install -e . --no-deps
+python -m pip install --no-deps https://github.com/willwas1/MANC-Q/archive/refs/heads/main.zip
 python -m pip install nmrglue
+```
+
+3. Start MANC-Q:
+
+```
 python -m mancq
 ```
 
-`--no-deps` stops pip from trying to replace Anaconda's own copies of numpy, PySide6 and the others. Next time,
-open Anaconda Prompt and run only the first and last lines. Otherwise, ask your IT team to approve MANC-Q.
+4. Optional: put a MANC-Q shortcut on the desktop, so you do not need Anaconda Prompt again:
+
+```
+python -m mancq shortcut
+```
+
+From then on, double-click the **MANC-Q** shortcut on the desktop (or open Anaconda Prompt and type
+`python -m mancq`). To update to a newer version, run the first line again with `--force-reinstall` added
+after `install`; the shortcut keeps working.
+
+`--no-deps` stops pip from replacing Anaconda's own numpy, PySide6 and the other packages MANC-Q uses. If MANC-Q
+then says PySide6 is missing, run `python -m pip install PySide6-Essentials` and try again.
 
 ## Your first analysis
 
@@ -155,7 +168,7 @@ The same program can be used from the command line, from scripts and from notebo
 [docs/COMMAND_LINE.md](docs/COMMAND_LINE.md).
 
 * With Python 3.9 or later: `pip install git+https://github.com/willwas1/MANC-Q.git`, then `mancq` (opens the
-  window) or `mancq --help`.
+  window) or `mancq --help`. On Windows, `mancq shortcut` puts a desktop shortcut that opens the window.
 * On a Mac or Linux without Python: install uv (`curl -LsSf https://astral.sh/uv/install.sh | sh`), then run
   `uvx --python 3.12 --from git+https://github.com/willwas1/MANC-Q mancq`. MANC-Q is developed and tested on
   Windows; other systems should work but are less tested.
@@ -195,7 +208,7 @@ Actions tab). To build on your own PC instead, run `packaging\build_windows.bat`
    `c = amplitude per proton x (ref_mM x 9 / reference area) x dilution`.
 2. The library is simulated at the spectrometer frequency and split into multiplets, one per proton group.
 3. A small global offset between the library and the referenced spectrum is measured from sharp compounds that
-   are clearly present (typically +10 to +12 Hz at 800 MHz in cell-culture media).
+   are clearly present (usually a few hertz).
 4. The whole spectrum (0.6 to 9.6 ppm) is fitted as non-negative compound amounts plus a smooth spline baseline.
    Each compound is then slid as a rigid pattern (a few Hz; more for pH-sensitive compounds), and overlapping
    multiplets are refined locally in position and width. This repeats three times. Peaks that no library compound

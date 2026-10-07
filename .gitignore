@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.ipynb_checkpoints/
+.mancq_cache/
+_cache/
+mancq_demo/
+# keep real data and results out of the repository
+results/
+output*/
+*.xlsx
+*.pdf
+*.npz
+*.csv.gz
+build_env/
+*.spec
+.runtime/
