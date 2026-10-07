@@ -2,6 +2,15 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 1.1.3 (7 October 2026)
+
+Repository tidy-up only; the fitting and the window are unchanged.
+
+* Added `CLAUDE.md` (notes for Claude Code: rules, layout, how to check a change).
+* `README_windows.md` removed from GitHub (the 1.1.2 folder never had it, so the 1.1.2 commit already drops it).
+* Version number raised to 1.1.3 in `pyproject.toml`, `mancq/engine.py`, `CITATION.cff`,
+  `packaging/installer.iss` and `constraints.txt`.
+
 ## 1.1.2 (7 October 2026)
 
 Compared with the 1.1.1 files on GitHub (uploaded 6 October):
