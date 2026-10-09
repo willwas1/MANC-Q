@@ -45,11 +45,29 @@ Optional settings:
 | `--pluronic auto/yes/ignore/no` | Pluronic F-68 / poloxamer (cell-culture media): model it if present (default), always model it, leave its regions (3.69-3.74, 1.10-1.20 ppm) out of the fit, or not present |
 | `--fids missing/all/never` | raw FIDs: process them where there is no TopSpin-processed spectrum (default), always, or never |
 | `--lb 0.3` | line broadening (Hz) used when processing FIDs |
+| `--processing proc.csv` | process these spectra in MANC-Q (see below); `processing_used.csv` from an earlier run repeats its processing exactly |
 | `--no-overlays` | skip the overlay PDFs |
 | `--workers 4` | number of spectra fitted in parallel |
 
 A fit takes roughly 1 to 5 minutes per spectrum on one core. Runs resume: if you stop a run and start it again,
-finished spectra are reused.
+finished spectra are reused (unless their processing has changed, in which case they are fitted again).
+
+### Changing the processing of a spectrum
+
+Spectra processed in TopSpin are used as they are. To change some, give a CSV file with `--processing`:
+
+```
+sample,source,lb,ph0,ph1,baseline
+10,topspin,0.5,1.5,0,False
+11,fid,0.3,,,False
+```
+
+* `source topspin`: start from TopSpin's spectrum; `ph0` and `ph1` are the change from TopSpin's phase in
+  degrees (0 = unchanged), `lb` is the total line broadening in Hz (blank = TopSpin's).
+* `source fid`: process the raw FID; `ph0` and `ph1` are the phase itself, blank = automatic.
+* `baseline True` adds a spline baseline correction (normally left off).
+
+Every run that processes spectra writes `processing_used.csv` in the results folder in this format.
 
 Put a desktop shortcut (Windows) that opens the window with the Python you ran this from:
 
@@ -61,6 +79,13 @@ Re-grade a finished run after changing grading settings (seconds rather than min
 
 ```
 mancq regrade path/to/results
+```
+
+Rebuild the tables and overlays after manual adjustments (made in the Review step of the window and saved in
+`_per_sample/<EXPNO>_manual.json`); nothing is refitted:
+
+```
+mancq apply-edits path/to/results
 ```
 
 From Python or a notebook:

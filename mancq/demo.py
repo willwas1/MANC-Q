@@ -16,13 +16,28 @@ TRUTH_MM = {  # concentrations in the NMR tube
 REF_MM = 0.5
 
 
+def imaginary_part(y):
+    """The imaginary spectrum that goes with the real spectrum y (stored high ppm first, as TopSpin does), as
+    TopSpin writes it to 1i: the transform of a time signal that starts at t = 0."""
+    N = y.size
+    s = np.fft.ifft(y)
+    s2 = np.zeros_like(s)
+    s2[0], s2[N // 2] = s[0], s[N // 2]
+    s2[N // 2 + 1:] = 2 * s[N // 2 + 1:]
+    return np.fft.fft(s2).imag
+
+
 def write_bruker(folder, ppm0, sw_hz, sf, y, title):
     pdir = os.path.join(folder, "pdata", "1")
     os.makedirs(pdir, exist_ok=True)
-    nc = int(np.ceil(np.log2(np.abs(y).max() / 2 ** 30))) if np.abs(y).max() > 2 ** 30 else 0
+    yi = imaginary_part(y)
+    big = max(np.abs(y).max(), np.abs(yi).max())
+    nc = int(np.ceil(np.log2(big / 2 ** 30))) if big > 2 ** 30 else 0
     np.round(y / 2.0 ** nc).astype("<i4").tofile(os.path.join(pdir, "1r"))
+    np.round(yi / 2.0 ** nc).astype("<i4").tofile(os.path.join(pdir, "1i"))
     procs = {"SF": sf, "SW_p": sw_hz, "OFFSET": ppm0, "SI": len(y), "FTSIZE": len(y), "STSI": len(y), "STSR": 0,
-             "NC_proc": nc, "BYTORDP": 0, "DTYPP": 0, "AXNUC": "<1H>"}
+             "NC_proc": nc, "BYTORDP": 0, "DTYPP": 0, "AXNUC": "<1H>", "WDW": 1, "LB": 0.0, "PHC0": 0.0,
+             "PHC1": 0.0}
     text = "##TITLE= Parameter file\n##JCAMPDX= 5.0\n" + "".join(f"##${k}= {v}\n" for k, v in procs.items()) + "##END=\n"
     for fn in ("procs", "proc"):
         open(os.path.join(pdir, fn), "w").write(text)

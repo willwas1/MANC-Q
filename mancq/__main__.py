@@ -4,6 +4,7 @@
     python -m mancq run  <spectra folder> <output folder> --ref-mm 0.5
     python -m mancq demo [<output folder>]
     python -m mancq regrade <output folder>
+    python -m mancq apply-edits <output folder>   (after manual adjustments: rebuild the tables and plots)
     python -m mancq gui
     python -m mancq shortcut      (Windows: put a MANC-Q shortcut on the desktop)
 """
@@ -38,6 +39,11 @@ def main(argv=None):
     r.add_argument("--fids", default="missing", choices=["missing", "all", "never"],
                    help="raw FIDs: process them where no TopSpin-processed spectrum exists (default), always, or never")
     r.add_argument("--lb", type=float, default=0.3, help="line broadening in Hz when processing FIDs (default 0.3)")
+    r.add_argument("--processing", default=None,
+                   help="CSV with columns sample,source,lb,ph0,ph1,baseline: spectra to process in MANC-Q "
+                        "(source topspin = TopSpin's spectrum with this phase change and total line broadening; "
+                        "source fid = the raw FID; blank ph0 = automatic). processing_used.csv from an earlier run "
+                        "repeats its processing exactly")
     r.add_argument("--no-overlays", action="store_true", help="skip the per-spectrum overlay PDFs (faster)")
     r.add_argument("--no-resume", action="store_true", help="refit spectra that already have results in the output folder")
 
@@ -51,6 +57,10 @@ def main(argv=None):
 
     g = sub.add_parser("regrade", help="re-apply grading rules to a finished run without refitting")
     g.add_argument("output", help="output folder of an earlier run")
+
+    e = sub.add_parser("apply-edits", help="rebuild the tables and plots of a run after manual adjustments "
+                                           "(saved in _per_sample/<sample>_manual.json by the Review step)")
+    e.add_argument("output", help="output folder of an earlier run")
 
     a = ap.parse_args(argv)
     if a.cmd is None:
@@ -68,6 +78,9 @@ def main(argv=None):
                      FID_MODE=a.fids, FID_LB=a.lb)
         if a.exclude:
             extra["EXCLUDE"] = [(4.60, 5.00)] + [tuple(sorted(e)) for e in a.exclude]
+        if a.processing:
+            from .engine import read_processing
+            extra["PROCESSING"] = read_processing(a.processing)
         run(a.spectra, a.output, a.ref_mm, dilution=a.dilution, dilution_file=a.dilution_file, **extra)
     elif a.cmd == "demo":
         from .demo import demo
@@ -97,6 +110,9 @@ def main(argv=None):
     elif a.cmd == "regrade":
         from .regrade import regrade
         regrade(a.output)
+    elif a.cmd == "apply-edits":
+        from .manual import update_results
+        update_results(a.output)
 
 
 if __name__ == "__main__":

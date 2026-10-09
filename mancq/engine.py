@@ -35,6 +35,10 @@ SETTINGS = dict(
     FID_MODE="missing",           # raw FIDs: "missing" = process an FID only where there is no processed spectrum,
                                   # "all" = always process from the FID, "never" = only use TopSpin-processed spectra
     FID_LB=0.3,                   # line broadening (Hz) when MANC-Q processes FIDs
+    PROCESSING=None,              # optional {sample: dict(source, lb, ph0, ph1, baseline)}: spectra MANC-Q processes
+                                  # itself. source "topspin" = TopSpin's spectrum with these changes (ph0/ph1 = change
+                                  # from TopSpin's phase, lb = total line broadening); source "fid" = the raw FID.
+                                  # Spectra not listed are used as TopSpin processed them (FIDs: see FID_MODE).
     PEO_DETECT_SNR=500,           # "auto": PEO line at 3.71 ppm taller than this x noise
     PEAKLIST_FIELD_MHZ=800.0,     # field at which the fixed peak lists in the library are defined
 
@@ -127,7 +131,7 @@ plt = _plt
 
 from .spinsim import simulate_spin_system, merge_sticks
 
-__version__ = "1.1.3"
+__version__ = "1.2.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -143,6 +147,7 @@ TIMING = {}
 # =============================================================================
 DECONV = "Deconvolution estimate (low confidence)"
 NOTMEAS = "Not measurable (region ignored)"
+MANUAL = "Manually adjusted"
 
 
 def _json_default(v):
@@ -199,6 +204,33 @@ def list_samples(data_dir, procno, fids=False):
     for d in sorted(os.listdir(data_dir), key=lambda x: (len(x), x)):
         if os.path.isdir(os.path.join(data_dir, d)) and _usable(os.path.join(data_dir, d), procno, fids):
             out.append(d)
+    return out
+
+
+def _num(v):
+    """A number from a settings file or table; blank / None / NaN -> None."""
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None
+    v = float(v)
+    return None if not np.isfinite(v) else v
+
+
+def _flag(v):
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "on")
+    return bool(v) if v is not None and not (isinstance(v, float) and np.isnan(v)) else False
+
+
+def read_processing(path):
+    """Processing table (CSV with columns sample, source, lb, ph0, ph1, baseline; blank ph0 = automatic phase),
+    as MANC-Q writes it to processing_used.csv -> the PROCESSING setting."""
+    df = pd.read_csv(path, dtype={"sample": str, "source": str})
+    out = {}
+    for _, r in df.iterrows():
+        src = str(r.get("source", "topspin")).strip().lower()
+        out[str(r["sample"]).strip()] = dict(source="fid" if src == "fid" else "topspin", lb=_num(r.get("lb")),
+                                             ph0=_num(r.get("ph0")), ph1=_num(r.get("ph1")),
+                                             baseline=_flag(r.get("baseline")))
     return out
 
 
@@ -1108,7 +1140,7 @@ def observed_peaks(res, lib, sample, sf):
 # =============================================================================
 PALETTE = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#17becf",
            "#bcbd22", "#393b79", "#637939", "#8c6d31", "#843c39", "#7b4173", "#3182bd", "#e6550d"]
-TAG = {"Quantified": "Q", "Overlapped (semi-quantitative)": "O", DECONV: "D",
+TAG = {"Quantified": "Q", "Overlapped (semi-quantitative)": "O", DECONV: "D", MANUAL: "M",
        "Upper bound only": "U", "Not detected": "", NOTMEAS: ""}
 
 
@@ -1281,7 +1313,7 @@ def profiles_pdf(conc, tier, path, title="Concentration across samples"):
     """Small multiples: concentration vs sample for every metabolite seen in the run."""
     samples = list(conc.columns)
     x = np.arange(len(samples))
-    ok = tier.isin(["Quantified", "Overlapped (semi-quantitative)", DECONV])
+    ok = tier.isin(["Quantified", "Overlapped (semi-quantitative)", DECONV, MANUAL])
     keep = [m for m in conc.index if ok.loc[m].sum() >= max(2, 0.25 * len(samples))]
     keep = sorted(keep, key=lambda m: -np.nanmean(np.where(ok.loc[m].values,
                                                            conc.loc[m].values.astype(float), np.nan)))
@@ -1301,12 +1333,14 @@ def profiles_pdf(conc, tier, path, title="Concentration across samples"):
                 for style, mk, fc, lab in [("Quantified", "o", None, "quantified"),
                                            ("Overlapped (semi-quantitative)", "s", "none", "overlapped"),
                                            (DECONV, "D", "none", "deconvolution estimate"),
+                                           (MANUAL, "P", None, "manually adjusted"),
                                            ("Upper bound only", "v", "none", "upper bound")]:
                     sel = t == style
                     if sel.any():
                         ax.scatter(x[sel], v[sel], marker=mk, s=18, facecolors=fc,
                                    color=("#2563eb" if style == "Quantified" else
-                                          "#d97706" if style.startswith("Overlapped") else "#8a8a8a"),
+                                          "#d97706" if style.startswith("Overlapped") else
+                                          "#0f766e" if style == MANUAL else "#8a8a8a"),
                                    label=lab, zorder=3)
                 good = t != "Not detected"
                 ax.plot(x[good], v[good], color="#c9c9c7", lw=0.8, zorder=1)
@@ -1338,7 +1372,7 @@ def process_sample(job):
     S.update(settings)
     per = os.path.join(out, "_per_sample")
     done = [os.path.join(per, f"{smp}_{k}.csv") for k in ("grades", "peaks", "obs", "qc")]
-    if S["RESUME"] and all(os.path.exists(f) for f in done):
+    if S["RESUME"] and all(os.path.exists(f) for f in done) and _same_source(per, smp):
         gr, pk, ob, qdf = (pd.read_csv(f) for f in done)
         return gr, pk, ob, qdf.iloc[0].to_dict(), None, [f"Sample {smp}: re-used earlier result"]
     try:
@@ -1347,6 +1381,27 @@ def process_sample(job):
         import traceback
         return None, None, None, dict(sample=smp, error=f"{type(exc).__name__}: {exc}"), None, \
             [f"Sample {smp} FAILED: {type(exc).__name__}: {exc}", traceback.format_exc()]
+
+
+def _source_desc(smp):
+    """Which spectrum a sample's fit came from and how it was processed; a saved result is only re-used if this
+    is unchanged."""
+    d, pn = sample_source(smp)
+    u = (S.get("PROCESSING_USED") or {}).get(smp)
+    d = os.path.normcase(os.path.abspath(d))
+    out = os.path.normcase(os.path.abspath(S["OUT_DIR"])) if S.get("OUT_DIR") else None
+    if out and d.startswith(out + os.sep):        # processed by MANC-Q into the results folder: the folder may move
+        d = "<results>" + d[len(out):].replace(os.sep, "/")
+    return json.dumps(dict(spectrum=d, procno=pn,
+                           processing=u["requested"] if u else None), sort_keys=True, default=str)
+
+
+def _same_source(per, smp):
+    f = os.path.join(per, f"{smp}_source.json")
+    if os.path.exists(f):
+        return open(f).read() == _source_desc(smp)
+    # results from before version 1.2: only re-used for spectra used as TopSpin processed them
+    return not (S.get("PROCESSING_USED") or {}).get(smp)
 
 
 def sample_source(smp):
@@ -1366,6 +1421,14 @@ def detect_pluronic(ppm, y):
 def _fit_one(smp, d, libdir, out):
     lines = []
     log = lambda msg: lines.append(msg)
+    per = os.path.join(out, "_per_sample")
+    os.makedirs(per, exist_ok=True)
+    mf = os.path.join(per, f"{smp}_manual.json")
+    if os.path.exists(mf):
+        aside = os.path.join(per, f"{smp}_manual_set_aside_{time.strftime('%Y%m%d_%H%M%S')}.json")
+        os.replace(mf, aside)
+        lines.append(f"   NOTE: sample {smp} was fitted again, so the manual adjustments made on its earlier fit "
+                     f"no longer apply; they were moved to _per_sample/{os.path.basename(aside)}")
     expdir, procno = sample_source(smp)
     ppm, y, sf, title = read_spectrum(expdir, procno)
     pluronic = detect_pluronic(ppm, y) if S["PLURONIC"] == "auto" else S["PLURONIC"] == "yes"
@@ -1387,11 +1450,11 @@ def _fit_one(smp, d, libdir, out):
              signal_explained_by_library=res["comp_fit"].sum() / sig_area,
              signal_in_unassigned_singlets=res["unk_fit"].sum() / sig_area if res["unk_fit"].size else 0.0,
              abs_residual_fraction=np.abs(res["yv"] - res["fit"]).sum() / sig_area,
-             fit_time_s=round(time.time() - t0, 1))
+             fit_time_s=round(time.time() - t0, 1),
+             processing=((S.get("PROCESSING_USED") or {}).get(smp) or {}).get(
+                 "description", f"as processed in TopSpin (pdata/{procno})"))
     if S["OVERLAYS"]:
         overlay_pdf(res, lib, gr, smp, os.path.join(out, f"overlay_sample_{smp}.pdf"))
-    per = os.path.join(out, "_per_sample")
-    os.makedirs(per, exist_ok=True)
     x = res["grid"].x
     cols = {"ppm": x, "observed": res["yv"], "simulated_total": res["fit"], "baseline": res["base_fit"]}
     for k, c in enumerate(lib):
@@ -1403,7 +1466,7 @@ def _fit_one(smp, d, libdir, out):
     np.savez_compressed(os.path.join(per, f"{smp}_fit.npz"), cf=cf, sigma=res["sigma"], fw0=res["fw0"],
                         x=res["grid"].x.astype(np.float32), yv=res["yv"].astype(np.float32),
                         fit=res["fit"].astype(np.float32), base=res["base_fit"].astype(np.float32),
-                        dx=res["grid"].dx, sf=sf, amp=res["amp"], se=res["se"], pluronic=pluronic,
+                        dx=res["grid"].dx, sf=sf, amp=res["amp"], se=res["se"], pluronic=pluronic, eta=res["eta"],
                         mp_json=np.array(json.dumps([{k: (v.tolist() if isinstance(v, np.ndarray) else v)
                                                       for k, v in m.items()} for m in res["MP"]],
                                                      default=_json_default)))
@@ -1412,16 +1475,74 @@ def _fit_one(smp, d, libdir, out):
     ob.to_csv(os.path.join(per, f"{smp}_obs.csv"), index=False)
     pd.DataFrame([q]).to_csv(os.path.join(per, f"{smp}_qc.csv"), index=False)
     open(os.path.join(per, f"{smp}_log.txt"), "w").write("\n".join(lines))
+    open(os.path.join(per, f"{smp}_source.json"), "w").write(_source_desc(smp))
     return gr, pk, ob, q, None, lines
 
 
-TIER_ORDER = {"Quantified": 0, "Overlapped (semi-quantitative)": 1, DECONV: 2,
-              "Upper bound only": 3, "Not detected": 4, NOTMEAS: 5}
+TIER_ORDER = {"Quantified": 0, "Overlapped (semi-quantitative)": 1, DECONV: 2, MANUAL: 3,
+              "Upper bound only": 4, "Not detected": 5, NOTMEAS: 6}
+
+
+# =============================================================================
+# 9. Manual adjustments (made in the Review step of the window)
+# =============================================================================
+def manual_file(out, smp):
+    return os.path.join(out, "_per_sample", f"{smp}_manual.json")
+
+
+def read_manual(out, smp):
+    """{metabolite: edit} for one sample, or {} (edits are kept in _per_sample/<sample>_manual.json)."""
+    f = manual_file(out, smp)
+    if not os.path.exists(f):
+        return {}
+    return json.load(open(f)).get("edits", {})
+
+
+def apply_manual(out, gr):
+    """Grades of one sample with its manual adjustments applied: an adjusted metabolite gets the tier
+    'Manually adjusted' and the value set by hand; the automatic tier and value are kept alongside."""
+    if not len(gr):
+        return gr
+    smp = str(gr["sample"].iloc[0])
+    ed = read_manual(out, smp)
+    gr = gr.copy()
+    for c in ("auto_tier", "auto_conc_mM", "manual_note"):
+        if c not in gr:
+            gr[c] = np.nan if c == "auto_conc_mM" else ""
+    gr["auto_tier"] = gr["auto_tier"].astype(object)
+    gr["manual_note"] = gr["manual_note"].astype(object)
+    for i in gr.index:
+        e = ed.get(gr.at[i, "metabolite"])
+        if e is None or gr.at[i, "tier"] == NOTMEAS:
+            continue
+        gr.at[i, "auto_tier"], gr.at[i, "auto_conc_mM"] = gr.at[i, "tier"], gr.at[i, "conc_mM"]
+        gr.at[i, "tier"], gr.at[i, "conc_mM"], gr.at[i, "se_mM"] = MANUAL, float(e["conc_mM"]), np.nan
+        how = e.get("reason") or "set by hand"
+        gr.at[i, "method"] = f"{how} in the Review step (shift {e.get('shift_Hz', 0):+.2f} Hz, " \
+                             f"linewidth x{e.get('width', 1.0):.2f})"
+        gr.at[i, "manual_note"] = f"{e.get('note', '')} [{e.get('user', '')}, {e.get('time', '')}]".strip()
+    return gr
 
 
 def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
-    """Build every table and figure from the per-sample results (also used by regrade.py)."""
+    """Build every table and figure from the per-sample results (also used by regrade.py and after manual
+    adjustments). Manual adjustments saved in _per_sample are applied here."""
+    grades = [apply_manual(out, g) for g in grades]
     G = pd.concat(grades, ignore_index=True)
+    edits = []
+    for g in grades:
+        smp = str(g["sample"].iloc[0]) if len(g) else ""
+        for met, e in read_manual(out, smp).items():
+            row = g[g.metabolite == met]
+            edits.append(dict(sample=smp, metabolite=met,
+                              automatic_tier=row.auto_tier.iloc[0] if len(row) else "",
+                              automatic_mM=row.auto_conc_mM.iloc[0] if len(row) else np.nan,
+                              manual_mM=e.get("conc_mM"), shift_Hz=e.get("shift_Hz", 0.0),
+                              multiplet_shifts_Hz=json.dumps(e.get("mult_shift_Hz", {})),
+                              linewidth_factor=e.get("width", 1.0), how=e.get("reason", "set by hand"),
+                              note=e.get("note", ""), user=e.get("user", ""), time=e.get("time", "")))
+    if not edits:
+        G = G.drop(columns=["auto_tier", "auto_conc_mM", "manual_note"], errors="ignore")
     P = pd.concat(peaks, ignore_index=True)
     O = pd.concat(obs, ignore_index=True)
     Q = pd.DataFrame(qc)
@@ -1445,14 +1566,17 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
                 report.loc[m, s_] = f"<={conc.loc[m, s_]:.2g}"
             elif t == DECONV:
                 report.loc[m, s_] = f"~{conc.loc[m, s_]:.3g}"
+            elif t == MANUAL:
+                report.loc[m, s_] = f"{conc.loc[m, s_]:.4g} (manual)"
             else:
                 report.loc[m, s_] = round(float(conc.loc[m, s_]), 4)
     summ = pd.DataFrame(dict(best_tier=best_tier))
     summ["class"] = G.groupby("metabolite").cls.first()
     for lab, cond in [("n_quantified", G.tier == "Quantified"), ("n_overlapped", G.tier.str.startswith("Overlapped")),
+                      ("n_manually_adjusted", G.tier == MANUAL),
                       ("n_detected_any", ~G.tier.isin(["Not detected", NOTMEAS]))]:
         summ[lab] = G[cond].groupby("metabolite").size()
-    summ = summ.fillna({"n_quantified": 0, "n_overlapped": 0, "n_detected_any": 0})
+    summ = summ.fillna({"n_quantified": 0, "n_overlapped": 0, "n_manually_adjusted": 0, "n_detected_any": 0})
     summ["mean_conc_mM"] = conc.mean(axis=1)
     summ["mean_rel_SE_%"] = (se / conc.replace(0, np.nan) * 100).mean(axis=1).round(1)
     summ["library_source"] = G.groupby("metabolite").source.first()
@@ -1463,8 +1587,8 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
 
     readme = pd.DataFrame(dict(item=[
         "Software", "Units", "Reference", "How numbers are produced", "Quantified", "Overlapped (semi-quantitative)",
-        DECONV, "Upper bound only", "Not detected", "SE", "Library", "Peak_list_by_metabolite",
-        "Observed_peaks_assigned", "QC", "Settings"], text=[
+        DECONV, MANUAL, "Upper bound only", "Not detected", "SE", "Library", "Peak_list_by_metabolite",
+        "Observed_peaks_assigned", "QC", "Manual_edits", "Settings"], text=[
         f"MANC-Q {__version__} (https://github.com/willwas1/MANC-Q), results written {time.strftime('%Y-%m-%d %H:%M')}.",
         "mM in the original medium = tube mM x dilution factor (from the dilution file).",
         f"{S['REFERENCE']} internal standard only: {S['TSP_MM_IN_TUBE']} mM in tube, 9 H, area from a pseudo-Voigt fit incl. 29Si satellites. No calibration against any sample or standard.",
@@ -1472,13 +1596,15 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         f"Clean reporter multiplet(s): SNR>={S['LOQ_SNR']}, this metabolite >={S['Q_MIN_DOMINANCE']:.0%} of the fitted signal under it, |observed-fit| <= {S['Q_MAX_MISFIT']} x its own signal, shift not at bound; either two or more reporters agreeing within x{S['MAX_REPORTER_RATIO']}, or one reporter carrying >={S['SINGLE_REPORTER_MIN_SHARE']:.0%} of the protons; no multiplet of the molecule contradicted by the data.",
         f"SNR>={S['LOQ_SNR']} but the best multiplet is shared (dominance {S['O_MIN_DOMINANCE']:.0%}-{S['Q_MIN_DOMINANCE']:.0%}) or misfit <= {S['O_MAX_MISFIT']}. Number depends on the overlap partners: use for trends.",
         f"No multiplet of this metabolite is resolved enough to quantify on its own, but the whole-compound least-squares fit over >={S['DECONV_MIN_MULTIPLETS']} fitted multiplets is well determined (relative SE <= {S['DECONV_MAX_REL_SE']:.0%}) and sits below the data upper bound. The value is that deconvolution estimate, shown with a ~ in Report_mM. It depends on the library explaining the overlapping signals correctly, so treat it as an estimate, not a measurement.",
+        "The value was set by hand in the Review step of the window (Chenomx-style: the whole simulated compound at one concentration, with a shift and linewidth chosen by the user), or refitted around a compound that was. The automatic tier and value are in the auto_tier and auto_conc_mM columns of Long_table, and every change, with who made it and when, is in Manual_edits. Report_mM marks these values with (manual). No standard error is given.",
         f"Signal is present where the metabolite would appear but it cannot be attributed to it with confidence (no usable reporter, or a multiplet the library predicts >{S['CONTRADICT_MIN_SNR']}x noise is missing). The value is the largest concentration the data allow (upper bound).",
         "Below the detection limit; Report_mM shows <LOD in mM. 'n/m' = not measurable: every peak of the metabolite lies in a region left out of the fit.",
         "Standard error from the least-squares fit only (noise + local misfit). Excludes library, relaxation (T1) and TSP weighing errors.",
         f"{sum(c['source']=='GISSMO' for c in lib)} GISSMO spin systems (BMRB, QM-simulated at the spectrometer frequency) + {sum(c['source']=='SPIN' for c in lib)} other spin system(s) simulated the same way + {sum(c['source']=='CASMDB' for c in lib)} fixed peak lists (CASMDB) + optional Pluronic F-68 terms. See Library sheet.",
         "Every multiplet of every metabolite in every sample: fitted centre, range, line positions and relative intensities, protons, linewidth, shift from library, dominance, misfit, concentration from that multiplet alone, and whether it was used as a reporter.",
         "Peaks picked in the observed spectrum (>10 x noise) with the fitted contributors at each apex (the peak assignment list).",
-        "Per-sample referencing, linewidth, noise, fit quality and fraction of signal explained.",
+        "Per-sample referencing, linewidth, noise, fit quality, fraction of signal explained, and how the spectrum was processed.",
+        "Every manual adjustment: sample, metabolite, automatic and manual value, shift and linewidth used, note, user and time. Empty if nothing was adjusted.",
         json.dumps({k: v for k, v in S.items() if k != "OVERLAY_REGIONS"})]))
     libdf = pd.DataFrame([dict(metabolite=c["name"], cls=c["cls"], source=c["source"], n_protons=c["nprot"],
                                titratable=c["titratable"], n_lines=len(c["ppm"]), n_multiplets=len(c["mults"]),
@@ -1496,6 +1622,8 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         P.to_excel(xw, sheet_name="Peak_list_by_metabolite", index=False)
         O.to_excel(xw, sheet_name="Observed_peaks_assigned", index=False)
         Q.to_excel(xw, sheet_name="QC", index=False)
+        (pd.DataFrame(edits) if edits else pd.DataFrame(dict(note=["No manual adjustments."]))).to_excel(
+            xw, sheet_name="Manual_edits", index=False)
         libdf.to_excel(xw, sheet_name="Library", index=False)
         for ws in xw.book.worksheets:
             ws.freeze_panes = "B2"
@@ -1511,6 +1639,11 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
     P.to_csv(os.path.join(out, "peak_list_by_metabolite.csv"), index=False)
     O.to_csv(os.path.join(out, "observed_peaks_assigned.csv"), index=False)
     Q.to_csv(os.path.join(out, "qc_per_sample.csv"), index=False)
+    me = os.path.join(out, "manual_edits.csv")
+    if edits:
+        pd.DataFrame(edits).to_csv(me, index=False)
+    elif os.path.exists(me):
+        os.remove(me)
     log("\nBest tier per metabolite across samples:")
     log(summ.best_tier.value_counts().to_string())
     log(Q.round(3).T.to_string())
@@ -1552,26 +1685,51 @@ def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, progress=No
 
     libdir = S["LIBRARY_DIR"] or os.path.join(HERE, "library")
     dil = read_dilutions(S["DILUTION_FILE"])
-    # raw FIDs: process them (automatic phasing) into <out>/_fid_processed unless already given in SAMPLE_DIRS
+    # spectra MANC-Q processes itself, into <out>/_processed/<sample> (the raw data are never changed): raw FIDs
+    # (automatic phasing unless PROCESSING says otherwise) and TopSpin spectra the user adjusted (PROCESSING)
     sd = dict(S.get("SAMPLE_DIRS") or {})
-    if S["FID_MODE"] != "never":
-        from . import fidproc
-        for smp in samples:
-            if smp in sd:
-                continue
-            ed = os.path.join(S["DATA_DIR"], smp)
-            if fidproc.has_fid(ed) and (S["FID_MODE"] == "all" or not fidproc.has_processed(ed, S["PROCNO"])):
-                dest = os.path.join(out, "_fid_processed", smp)
-                say("fid_processing", smp, dict(k=len(sd) + 1, n=len(samples)))
-                r = fidproc.process_fid(ed, lb=S["FID_LB"])
-                fidproc.write_processed(r, dest, title=f"EXPNO {smp} (from FID)")
-                open(os.path.join(dest, "processing.txt"), "w").write(
-                    f"Processed from {ed} by MANC-Q: LB {r['lb']} Hz, SI {r['si']}, automatic phase "
-                    f"ph0 {r['ph0']:.2f}, ph1 {r['ph1']:.2f}\n")
-                sd[smp] = (dest, 1)
-                log(f"EXPNO {smp}: processed from the FID (automatic phase ph0 {r['ph0']:.1f}, ph1 {r['ph1']:.1f}); "
-                    f"check its overlay")
+    req = {str(k): dict(v) for k, v in (S.get("PROCESSING") or {}).items()}
+    used = {}
+    from . import fidproc
+    todo = []
+    for smp in samples:
+        if smp in sd:
+            continue
+        ed = os.path.join(S["DATA_DIR"], smp)
+        p = req.get(smp)
+        if p is None and S["FID_MODE"] != "never" and fidproc.has_fid(ed) and \
+                (S["FID_MODE"] == "all" or not fidproc.has_processed(ed, S["PROCNO"])):
+            p = dict(source="fid", lb=S["FID_LB"], ph0=None, ph1=None, baseline=False)
+        if p is not None:
+            todo.append((smp, ed, p))
+    for k_, (smp, ed, p) in enumerate(todo, 1):
+        if stop():
+            log("Cancelled while processing spectra: nothing was fitted.")
+            say("cancelled", None, dict(not_fitted=list(samples)))
+            logf.close()
+            return None
+        say("fid_processing", smp, dict(k=k_, n=len(todo), source=p.get("source", "fid")))
+        p = dict(source=p.get("source") or "fid", lb=_num(p.get("lb")), ph0=_num(p.get("ph0")),
+                 ph1=_num(p.get("ph1")), baseline=_flag(p.get("baseline")))
+        r = fidproc.process(ed, S["PROCNO"], **p)
+        dest = os.path.join(out, "_processed", smp)
+        fidproc.write_processed(r, dest, title=f"EXPNO {smp} (processed by MANC-Q)")
+        open(os.path.join(dest, "processing.txt"), "w").write(
+            f"Processed from {ed} by MANC-Q {__version__}: {r['description']}\n")
+        sd[smp] = (dest, 1)
+        used[smp] = dict(requested=p, source=p["source"], lb=round(r["lb"], 4), ph0=round(r["ph0"], 3),
+                         ph1=round(r["ph1"], 3), baseline=r["baseline"], automatic_phase=bool(r.get("auto")),
+                         description=r["description"])
+        log(f"EXPNO {smp}: {r['description']}; check its overlay")
     S["SAMPLE_DIRS"] = sd
+    S["PROCESSING_USED"] = used
+    # the processing actually used, in the form --processing reads (blank phase = automatic)
+    rows = [dict(sample=s_, source=u["source"], lb=u["lb"],
+                 ph0="" if u["requested"]["ph0"] is None else u["ph0"],
+                 ph1="" if u["requested"]["ph0"] is None else u["ph1"],
+                 baseline=u["baseline"], description=u["description"]) for s_, u in used.items()]
+    if rows:
+        pd.DataFrame(rows).to_csv(os.path.join(out, "processing_used.csv"), index=False)
     os.makedirs(os.path.join(out, "_per_sample"), exist_ok=True)
     json.dump(dict({k: v for k, v in S.items() if k != "OVERLAY_REGIONS"}, MANCQ_VERSION=__version__),
               open(os.path.join(out, "_per_sample", "run_settings.json"), "w"), indent=1, default=str)

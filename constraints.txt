@@ -1,4 +1,4 @@
-# Exact package versions MANC-Q 1.1.3 was tested with (Python 3.12).
+# Exact package versions MANC-Q 1.2.0 was tested with (Python 3.12).
 # MANC-Q.bat and the Windows build use these, so everyone gets the same numbers.
 # Small numerical differences between package versions can move Overlapped/Deconvolution values.
 contourpy==1.4.0

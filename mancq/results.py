@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 TIERS = ["Quantified", "Overlapped (semi-quantitative)", "Deconvolution estimate (low confidence)",
-         "Upper bound only", "Not detected", "Not measurable (region ignored)"]
+         "Manually adjusted", "Upper bound only", "Not detected", "Not measurable (region ignored)"]
 
 
 def is_results_folder(out):
@@ -18,7 +18,7 @@ def load(out):
     G = G[~G.metabolite.str.startswith("Pluronic")]
     Q = pd.read_csv(os.path.join(out, "qc_per_sample.csv"), dtype={"sample": str})
     samples = list(dict.fromkeys(G["sample"]))
-    good = G[G.tier.isin(TIERS[:3])]
+    good = G[G.tier.isin(TIERS[:4])]
     order = good.groupby("metabolite").conc_mM.median().sort_values(ascending=False).index.tolist()
     rest = [m for m in dict.fromkeys(G.metabolite) if m not in order]
     return dict(long=G, qc=Q, samples=samples, metabolites=order + rest)

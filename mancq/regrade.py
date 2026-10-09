@@ -8,22 +8,31 @@ import pandas as pd
 from . import engine as q
 
 
+GRADING_KEYS = ("LOD_SNR", "LOQ_SNR", "Q_MIN_DOMINANCE", "Q_MAX_MISFIT", "MAX_REPORTER_RATIO", "MAX_CONC_OVER_BOUND",
+                "SINGLE_REPORTER_MIN_SHARE", "CONTRADICT_MIN_SNR", "CONTRADICT_FRACTION", "O_MIN_DOMINANCE",
+                "O_MAX_MISFIT", "DECONV_MAX_REL_SE", "DECONV_MIN_MULTIPLETS")
+
+
+def restore_settings(out, grading_from_run=False):
+    """Put a finished run's own settings (ignored regions, reference, ...) back into the engine settings.
+    Grading rules come from the current code unless grading_from_run is True."""
+    sfile = os.path.join(out, "_per_sample", "run_settings.json")
+    if not os.path.exists(sfile):
+        return
+    saved = json.load(open(sfile))
+    for k in ("EXCLUDE", "FIT_RANGE", "PLURONIC_REGIONS"):
+        if k in saved:
+            saved[k] = [tuple(x) for x in saved[k]] if k != "FIT_RANGE" else tuple(saved[k])
+    saved.pop("SAMPLE_DIRS", None)
+    saved.pop("MANCQ_VERSION", None)
+    keep = {} if grading_from_run else {k: q.S[k] for k in GRADING_KEYS}
+    q.S.update(saved)
+    q.S.update(keep)
+
+
 def regrade(out, library_dir=None):
     per = os.path.join(out, "_per_sample")
-    sfile = os.path.join(per, "run_settings.json")
-    if os.path.exists(sfile):                 # the run's own settings (ignored regions, reference, ...)
-        import json
-        saved = json.load(open(sfile))
-        for k in ("EXCLUDE", "FIT_RANGE", "PLURONIC_REGIONS"):
-            if k in saved:
-                saved[k] = [tuple(x) for x in saved[k]] if k != "FIT_RANGE" else tuple(saved[k])
-        saved.pop("SAMPLE_DIRS", None)
-        keep = {k: q.S[k] for k in ("LOD_SNR", "LOQ_SNR", "Q_MIN_DOMINANCE", "Q_MAX_MISFIT", "MAX_REPORTER_RATIO",
-                                     "MAX_CONC_OVER_BOUND", "SINGLE_REPORTER_MIN_SHARE", "CONTRADICT_MIN_SNR",
-                                     "CONTRADICT_FRACTION", "O_MIN_DOMINANCE", "O_MAX_MISFIT", "DECONV_MAX_REL_SE",
-                                     "DECONV_MIN_MULTIPLETS")}
-        q.S.update(saved)
-        q.S.update(keep)                      # grading rules come from the current code / SETTINGS
+    restore_settings(out)
     files = sorted([f for f in os.listdir(per) if f.endswith("_fit.npz")], key=lambda f: (len(f), f))
     samples = [f[:-len("_fit.npz")] for f in files]
     libdir = library_dir or os.path.join(q.HERE, "library")

@@ -21,6 +21,10 @@ standard. No spiked standards and no calibration curves are needed.
 5. **A confidence tier for every value.** Each result is graded by how well its signals are resolved and fitted
    (Quantified, Overlapped, Estimate, Upper bound, Not detected), so it is clear which numbers are measurements
    and which are estimates.
+6. **Your own checks, if you want them.** Before the run you can re-phase or re-broaden any spectrum, starting
+   from TopSpin's own processing. After the run you can review each compound over the measured spectrum and
+   adjust it by hand, as in Chenomx; adjusted values get their own tier, "Manually adjusted", with the automatic
+   value kept beside them.
 
 ![MANC-Q results screen](docs/images/6_results.png)
 
@@ -88,19 +92,24 @@ then says PySide6 is missing, run `python -m pip install PySide6-Essentials` and
 
 ## Your first analysis
 
-MANC-Q opens on the first of six tabs. The full guide with pictures is in
-[docs/QUICKSTART_GUI.md](docs/QUICKSTART_GUI.md).
+MANC-Q opens on the first of seven tabs. The full guide with pictures is in
+[docs/QUICKSTART_GUI.md](docs/QUICKSTART_GUI.md), and the **Help** button on each tab shows its part of it.
+MANC-Q remembers your settings from the last session.
 
 1. **Spectra.** Click **Try the demo** the first time: it makes two synthetic spectra with known
    concentrations, so you can practise. For your own data, click **Browse** and choose the TopSpin dataset
    folder (the folder that contains the numbered experiment folders such as `10`, `11`, `12`).
-2. **Process FIDs.** Only appears if some experiments have not been processed in TopSpin. Check the phasing.
+2. **Process spectra.** Spectra processed in TopSpin are used as they are unless you choose to change their
+   phase or line broadening (starting from TopSpin's result). Raw FIDs are processed here: check the phasing.
 3. **Regions.** Parts of the spectrum to leave out. The defaults suit most cell-culture samples.
 4. **Settings.** Type the concentration of TSP (or DSS) in the NMR tube, and the dilution if you want
    concentrations in the original sample.
 5. **Run.** Click **Start**. Each spectrum takes 1 to 5 minutes.
 6. **Results.** A table of metabolites by samples. Click any value to see the fit it came from.
    **Open Excel workbook** gives every table.
+7. **Review.** Optional: look at each compound drawn over the measured spectrum and, where the automatic fit
+   is wrong, drag it to the right height and position (or type the values), as in Chenomx. **Save adjustments
+   and update results** rewrites the tables and overlays.
 
 ## What your data needs to be
 
@@ -129,6 +138,7 @@ sheet. Each value has a confidence tier:
 | Quantified | at least one of the compound's signals is clean and well fitted; treat it as a measurement | a number |
 | Overlapped | its best signal is shared with other compounds; semi-quantitative, good for trends | a number |
 | Deconvolution estimate | no clean signal; estimated from the fit of the whole compound | `~number` |
+| Manually adjusted | set by hand in the Review step; the automatic value and tier are kept alongside, and every change (who, when, why) is in the `Manual_edits` sheet | `number (manual)` |
 | Upper bound only | something is there, but it cannot be attributed to this compound | `<=number` |
 | Not detected | below 3 x noise | `<LOD` |
 | Not measurable | all its peaks are in a region you chose to leave out | `n/m` |
@@ -144,7 +154,8 @@ measured spectrum, the fit and each compound's contribution.
 | MANC-Q.bat says the download failed | Check the internet connection. University and company firewalls sometimes block the download; try another network once, or use the installer (Option 1). Running MANC-Q.bat again carries on where it stopped. |
 | "This file must stay inside the MANC-Q folder" | You opened MANC-Q.bat from inside the ZIP. Extract the ZIP first (right-click, Extract All). |
 | No experiments are listed | Choose the folder that contains the numbered experiment folders, not an experiment folder or a single file. |
-| Results look wrong | Check the TSP/DSS concentration, the phasing (tab 2, or in TopSpin) and the overlay PDF for that sample. |
+| Results look wrong | Check the TSP/DSS concentration, the phasing (step 2, or in TopSpin) and the overlay PDF for that sample, then look at the compound in step 7 (Review). |
+| An error message appears | Click **Copy error details** and paste them into an e-mail or a GitHub issue. |
 
 To ask for help, open an [issue](https://github.com/willwas1/MANC-Q/issues) with a screenshot of the error and,
 if there is one, the `run_log.txt` file from the results folder.
@@ -187,7 +198,12 @@ Actions tab). To build on your own PC instead, run `packaging\build_windows.bat`
 
 * **Fit and grading settings** are in the `SETTINGS` block at the top of `mancq/engine.py`, each with a comment.
 * **Re-grade without refitting**: after changing grading settings, run
-  `python -m mancq regrade path/to/results` (seconds rather than minutes per spectrum).
+  `python -m mancq regrade path/to/results` (seconds rather than minutes per spectrum). Manual adjustments are
+  kept.
+* **Manual adjustments** are stored per sample in `_per_sample/<EXPNO>_manual.json` (plain JSON) and applied
+  when the tables are written (`mancq/manual.py`; `python -m mancq apply-edits path/to/results` rebuilds the
+  tables and overlays from them). Fitting a sample again sets its adjustments aside, because they refer to the
+  earlier fit.
 * **Adding a compound**:
   1. Find it at <https://gissmo.bmrb.io> and copy its spin-system matrix (shifts and couplings).
   2. Add one line to `mancq/library/gissmo_spin_systems.txt` in the same format as the others:
@@ -231,8 +247,12 @@ Actions tab). To build on your own PC instead, run `packaging\build_windows.bat`
 * Phasing matters. The same FIDs processed by MANC-Q (automatic phasing) and by TopSpin gave the same
   concentrations on the median (ratio 1.00), and the MANC-Q-phased spectra fitted slightly better, but a 1 to 3
   degree difference in zero-order phase moved a few individual values by 10 to 30 % (for example choline, and
-  glucose in one spectrum). Check the phasing (tab 2 of the window shows it before the run; from the command line, look at the overlays) for any
-value you rely on, or process the FIDs in TopSpin.
+  glucose in one spectrum). Check the phasing (step 2 of the window shows it before the run; from the command
+  line, look at the overlays) for any value you rely on, or process the FIDs in TopSpin. From version 1.2 a
+  spectrum processed in TopSpin can be adjusted in step 2 starting from TopSpin's own phase, so this difference
+  does not arise unless you change the phase yourself.
+* Manually adjusted values depend on the person who made them. They are flagged as such everywhere; report how
+  many values were adjusted, and why, when you publish them.
 * Not corrected: incomplete T1 relaxation (use a long enough recycle delay), weighing error of the reference,
   and reference binding to proteins (serum and plasma need ultrafiltration or an ERETIC-type reference).
 * The 25 compounds described by fixed peak lists (see `library/peaklists_manifest.csv`) are exact only near

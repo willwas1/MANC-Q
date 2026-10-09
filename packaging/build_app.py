@@ -16,7 +16,9 @@ EXCLUDE = ["PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtQ
 
 args = ["--noconfirm", "--clean", "--windowed", "--name", "MANC-Q", "--paths", ROOT,
         "--add-data", os.path.join(ROOT, "mancq", "library") + os.pathsep + "mancq/library",
-        "--hidden-import", "mancq.gui.app", "--hidden-import", "mancq.gui.runner"]
+        "--add-data", os.path.join(ROOT, "mancq", "help") + os.pathsep + "mancq/help",
+        "--hidden-import", "mancq.gui.app", "--hidden-import", "mancq.gui.runner",
+        "--hidden-import", "mancq.manual", "--hidden-import", "mancq.regrade"]
 for m in EXCLUDE:
     args += ["--exclude-module", m]
 args.append(os.path.join(HERE, "mancq_app.py"))
