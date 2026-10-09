@@ -381,7 +381,8 @@ class SpectraTab(QWidget):
         folder = os.path.join(os.path.expanduser("~"), "MANC-Q demo")
         spec = os.path.join(folder, "spectra")
         if not (os.path.exists(os.path.join(spec, "10", "pdata", "1", "1i"))      # older demos had no 1i
-                and os.path.exists(os.path.join(spec, "11", "fid"))):
+                and os.path.exists(os.path.join(spec, "11", "fid"))
+                and os.path.exists(os.path.join(spec, "12", "pdata", "1", "2rr"))):  # nor a 2D (before 1.3)
             QApplication.setOverrideCursor(Qt.WaitCursor)
             try:
                 dm.write_demo(spec, 600.13, cache_dir=CACHE)
@@ -393,9 +394,10 @@ class SpectraTab(QWidget):
         QMessageBox.information(self, "Demo spectrum", "Two synthetic 600 MHz spectra of 18 metabolites at known "
                                 "concentrations have been made (reference 0.5 mM, no dilution): EXPNO 10 is processed, "
                                 "EXPNO 11 is a raw FID so you can practise phasing (EXPNO 10 can be adjusted too: "
-                                "untick \"Use TopSpin's processing as is\"). Click Next through the steps and Start; "
-                                "the true concentrations are listed in mancq/demo.py. Afterwards, step 7 lets you "
-                                "review and adjust the fit of each compound.")
+                                "untick \"Use TopSpin's processing as is\"). EXPNO 12 is a 2D TOCSY of EXPNO 10: after "
+                                "the run, click 2D in the Results step to see it. Click Next through the steps and "
+                                "Start; the true concentrations are listed in mancq/demo.py. Afterwards, step 7 lets "
+                                "you review and adjust the fit of each compound.")
 
     def scan(self):
         folder = self.path.text().strip()

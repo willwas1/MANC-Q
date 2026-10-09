@@ -2,6 +2,11 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 1.3.1 (9 October 2026)
+
+* **Try the demo** now rebuilds a demo folder made before 1.3 (it had no 2D), so the demo TOCSY (EXPNO 12) is
+  always there, and its message says how to see it (click **2D** in the Results step).
+
 ## 1.3.0 (9 October 2026)
 
 The Results step can now show the whole spectrum and 2D spectra. The fitting and grading are unchanged.
