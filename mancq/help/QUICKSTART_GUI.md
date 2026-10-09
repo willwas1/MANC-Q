@@ -93,6 +93,24 @@ metabolites with only the values you chose to show.
 * **Copy:** select cells and press **Ctrl+C** to copy them as shown, with metabolite and sample names, ready to
   paste into Excel. Right-click and choose **Copy numbers only** to get plain numbers (blank where there is no
   reportable value), for Prism or calculations.
+* **The plot on the right** has two pairs of buttons. **This metabolite** zooms to the selected metabolite and
+  **Whole spectrum** shows the whole spectrum, with the metabolite filled in purple and arrows over its peaks.
+  **Peak** picks which of its peaks to zoom to (the main one, all of them, or any single one). Turn the mouse
+  wheel over the plot to zoom in and out; the toolbar above it has a magnifier (drag a box to zoom), cross
+  arrows (move around) and a house (back to the start).
+* **2D spectra (TOCSY, COSY):** click **2D** to see the 2D spectrum of the same sample. MANC-Q finds it by
+  itself: a processed 2D experiment (`pdata/1/2rr`) in the same data folder with the same title, nearest in
+  EXPNO. If the nearest 2D has a different title, it is still shown but with a red warning, because it may be a
+  different sample; **Choose 2D spectrum...** picks the right EXPNO folder by hand (remembered in the results
+  folder). The 2D is moved so that its TSP peak is at 0 ppm, like the 1D. Circles mark the cross peaks the
+  metabolite should give (protons coupled to each other in its library spin system, at the positions fitted in
+  the 1D): **green = seen** (a real peak top there, at least 10 x the 2D noise), **red = missing**. The 1D with
+  the metabolite in purple is drawn above the 2D. **Contours from** sets the lowest contour level (raise it if
+  the plot is crowded). **2D check of all metabolites...** lists every metabolite of the sample with how many of
+  its expected cross peaks are seen, and can save that as `twod_check_sample_<EXPNO>.csv`. The 2D is a check of
+  identity only: it never changes a value. Seen cross peaks support an assignment; missing ones on a strong
+  metabolite deserve a look; weak metabolites may simply be too weak for the 2D. Compounds from fixed peak
+  lists and singlets (for example formate, acetate) have no cross peaks to check.
 * **Save this plot...** saves the plot on the right as PNG (300 dpi), SVG (editable) or PDF.
 * **Recent results...** reopens results folders you looked at before.
 

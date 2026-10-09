@@ -2,6 +2,27 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 1.3.0 (9 October 2026)
+
+The Results step can now show the whole spectrum and 2D spectra. The fitting and grading are unchanged.
+
+* **Whole spectrum and zoom in Results.** New buttons above the plot: **This metabolite** / **Whole spectrum**
+  (the whole spectrum with the selected metabolite filled in purple and arrows over its peaks), and a **Peak**
+  list to zoom to the main peak, all peaks or any single multiplet. The mouse wheel zooms around the pointer and
+  a toolbar gives box zoom, pan and back to the start.
+* **2D spectra (TOCSY, COSY) in Results** (new `mancq/twod.py`). The **2D** button shows the 2D spectrum of the
+  sample as contours, with the 1D and the fitted metabolite above it. The 2D is found automatically (same data
+  folder, same title, nearest EXPNO; a nearby 2D with a different title is shown with a warning) or chosen with
+  **Choose 2D spectrum...** (kept in `_per_sample/twod_links.json`). TopSpin submatrix `2rr` files are read
+  directly, and the 2D is re-referenced to its TSP diagonal peak. For the selected metabolite MANC-Q predicts
+  its cross peaks from the library spin system (couplings of 2 Hz or more, at the shifts fitted in the 1D,
+  including the sample's library offset) and marks each as seen (a peak top at least 10 x the 2D noise within
+  0.015 ppm) or missing. **2D check of all metabolites...** gives this for every metabolite of the sample and
+  saves `twod_check_sample_<EXPNO>.csv`. This is an identity check only; no value is changed. On real 800 MHz
+  TOCSY data, quantified metabolites had a median of all their cross peaks seen, upper bounds about a quarter.
+* The synthetic demo has a third experiment, EXPNO 12: a TOCSY of the same mixture as EXPNO 10, so the 2D view
+  can be tried. 2D experiments are never taken as 1D samples.
+
 ## 1.2.0 (9 October 2026)
 
 Two new features and a set of improvements to the window. The fitting and grading themselves are unchanged.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mancq"
-version = "1.2.0"
+version = "1.3.0"
 description = "MANC-Q: Metabolite Abundance by NMR Curve-fitting, Quantified. 1H NMR metabolite quantification by whole-spectrum fitting of simulated GISSMO spin systems"
 readme = "README.md"
 requires-python = ">=3.9"

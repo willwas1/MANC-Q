@@ -110,11 +110,60 @@ def write_fid(folder, fid, sw_hz, sf, o1_ppm, title=""):
     open(os.path.join(folder, "acqu"), "w").write(text)
 
 
+def make_tocsy(sf=600.13, seed=3, si2=1024, si1=512, sw_ppm=12.0, ppm0=10.5):
+    """A synthetic 1H-1H TOCSY of the same mixture: a diagonal peak for every proton and a cross peak for every
+    pair of protons in one coupled spin system, at the library shifts (as the 2D check in the Results step
+    expects). Returns the 2D array [F1, F2]."""
+    from . import twod
+    rng = np.random.default_rng(seed)
+    f2 = ppm0 - np.arange(si2) * sw_ppm / si2
+    f1 = ppm0 - np.arange(si1) * sw_ppm / si1
+    z = np.zeros((si1, si2))
+    w2, w1 = 0.006, 0.012                             # peak widths (ppm), broader in F1 as in a real TOCSY
+
+    def put(x, y, h):
+        gx = np.exp(-0.5 * ((f2 - x) / w2) ** 2)
+        gy = np.exp(-0.5 * ((f1 - y) / w1) ** 2)
+        z[:] += h * np.outer(gy, gx)
+    put(0.0, 0.0, 9 * REF_MM)
+    for met, mm in TRUTH_MM.items():
+        e = twod.spin_system(met)
+        if e is None:
+            continue
+        cs = np.asarray(e["shifts"], float)
+        for c in cs:
+            put(c, c, mm)
+        for i, j in twod._groups(len(cs), e["J"], cosy=False):
+            if abs(cs[i] - cs[j]) >= twod.MIN_SEP_PPM:
+                put(cs[i], cs[j], 0.3 * mm); put(cs[j], cs[i], 0.3 * mm)
+    z += rng.normal(0, 1, z.shape) * z.max() / 3000
+    return z, f2, f1
+
+
+def write_tocsy(folder, z, sf, sw_ppm=12.0, ppm0=10.5, title=""):
+    """Write a 2D spectrum as TopSpin does (2rr in one submatrix, procs + proc2s, acqus + acqu2s)."""
+    pdir = os.path.join(folder, "pdata", "1")
+    os.makedirs(pdir, exist_ok=True)
+    si1, si2 = z.shape
+    scale = 2e8 / np.abs(z).max()
+    np.round(z * scale).astype("<i4").tofile(os.path.join(pdir, "2rr"))
+    def jcamp(p):
+        return "##TITLE= Parameter file\n##JCAMPDX= 5.0\n" + "".join(f"##${k}= {v}\n" for k, v in p.items()) + "##END=\n"
+    for fn, si in (("procs", si2), ("proc2s", si1)):
+        p = {"SF": sf, "SW_p": sw_ppm * sf, "OFFSET": ppm0, "SI": si, "XDIM": si, "NC_proc": 0, "BYTORDP": 0,
+             "DTYPP": 0, "AXNUC": "<1H>"}
+        open(os.path.join(pdir, fn), "w").write(jcamp(p))
+    for fn in ("acqus", "acqu2s"):
+        a = {"PULPROG": "<mlevphpr.2>", "NUC1": "<1H>", "SFO1": sf, "TD": 2048, "SW": sw_ppm}
+        open(os.path.join(folder, fn), "w").write(jcamp(a))
+    open(os.path.join(pdir, "title"), "w").write(title)
+
+
 def demo(out="mancq_demo", sf=600.13):
     spec_dir = os.path.join(out, "spectra")
     res_dir = os.path.join(out, "results")
     print(f"Writing two synthetic {sf:.2f} MHz spectra of {len(TRUTH_MM)} metabolites to {spec_dir}:\n"
-          f"  EXPNO 10 processed (1r), EXPNO 11 raw FID only (processed by MANC-Q) ...")
+          f"  EXPNO 10 processed (1r), EXPNO 11 raw FID only (processed by MANC-Q), EXPNO 12 a 2D TOCSY of 10 ...")
     write_demo(spec_dir, sf, cache_dir=os.path.join(out, "results", "_cache"))
     q.run(spec_dir, res_dir, REF_MM, dilution=1.0, N_WORKERS=2, RESUME=False)
     g = pd.read_csv(os.path.join(res_dir, "concentrations_long.csv"), dtype={"sample": str})
@@ -138,8 +187,10 @@ def demo(out="mancq_demo", sf=600.13):
 
 
 def write_demo(spec_dir, sf=600.13, cache_dir=".mancq_cache"):
-    """Write the two demo experiments: 10 (processed) and 11 (raw FID only)."""
+    """Write the demo experiments: 10 (processed), 11 (raw FID only) and 12 (a TOCSY of the same sample as 10)."""
     ppm0, sw_hz, y = make_spectrum(sf, cache_dir=cache_dir)
     write_bruker(os.path.join(spec_dir, "10"), ppm0, sw_hz, sf, y, "MANC-Q synthetic demo (processed)")
     fid, fsw, o1 = make_fid(sf, cache_dir=cache_dir)
     write_fid(os.path.join(spec_dir, "11"), fid, fsw, sf, o1, "MANC-Q synthetic demo (raw FID)")
+    z, _, _ = make_tocsy(sf)
+    write_tocsy(os.path.join(spec_dir, "12"), z, sf, title="MANC-Q synthetic demo (processed)")
