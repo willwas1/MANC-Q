@@ -241,6 +241,13 @@ Actions tab). To build on your own PC instead, run `packaging\build_windows.bat`
 peak(s) each Quantified or Overlapped value comes from. The Results step shows it as its first column,
 **Peak used (ppm)**.
 
+### Chemical shift table for your paper
+
+Every run writes `chemical_shift_assignments.xlsx`: a formatted supplementary table of the 1H chemical shifts of
+every metabolite reported (Quantified, Overlapped or Manually adjusted in at least 25 % of the samples),
+with `*` on the peaks used to quantify it, `**` on shared peaks, the number of samples and the reference
+spectrum, and a footnote. MANC-Q fits 1H spectra only, so the table has no 13C shifts.
+
 ### Figures for papers
 
 Step 8 of the window, **Figures**, draws publication figures from a results folder: a representative spectrum

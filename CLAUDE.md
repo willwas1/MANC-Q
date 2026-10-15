@@ -28,7 +28,10 @@ em dashes in anything you write for him.
   Review, Figures); `gui/runner.py` runs the fit in a separate process; `gui/figures_tab.py` the Figures
   step, drawn by `mancq/figures.py` (templates, forgiving sample sheet reader, own TIFF writer because
   Anaconda's Pillow crashes on compressed TIFFs).
-* `tests/`: checks on synthetic data only (`python tests/test_ph_estimate.py`, `python tests/test_figures.py`).
+* `mancq/shifttable.py` chemical shift assignment table (chemical_shift_assignments.xlsx), written with
+  every results update.
+* `tests/`: checks on synthetic data only (`python tests/test_ph_estimate.py`, `python tests/test_figures.py`,
+  `python tests/test_shift_table.py`).
 * `mancq/library/`: `compounds.csv` (149 compounds: 123 GISSMO, 25 CASMDB peak lists, 1 literature spin
   system), `gissmo_spin_systems.txt`, `other_spin_systems.txt`, `peaklists.csv`, `peaklists_manifest.csv`.
 * `MANC-Q.bat` double-click launcher (downloads uv + private Python into `.runtime`); `constraints.txt` exact

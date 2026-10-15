@@ -125,6 +125,14 @@ metabolites with only the values you chose to show.
   Quantified or Overlapped. Hover over a value to see the peak(s) used in that sample. The same information
   is in the `reporter_ppm` column of `concentrations_long.csv` and the `Long_table` sheet. Results made
   before version 1.5 take it from the peak list.
+* **Chemical shift table for your paper:** every run also writes `chemical_shift_assignments.xlsx` in the
+  results folder (and the `Shift_assignments` sheet of the workbook): one row per metabolite with its 1H
+  chemical shifts (the fitted peak centres, median over the samples), `*` on the peaks used to quantify it
+  and `**` on peaks used but shared with another metabolite, the number of samples, and the reference
+  spectrum (for example GISSMO bmse000208), with a footnote explaining it all, ready for a supplementary
+  table. It lists metabolites that were Quantified, Overlapped or Manually adjusted in at least 25 % of the
+  samples (settings `SHIFT_TABLE_TIERS` and `SHIFT_TABLE_MIN_FRACTION`); it is rewritten whenever the
+  results are (after Review adjustments, or `mancq regrade`).
 * **Save this plot...** saves the plot on the right as PNG (300 dpi), SVG (editable) or PDF.
 * **Recent results...** reopens results folders you looked at before.
 
@@ -196,8 +204,10 @@ Replicates of one group at one time become one line: either the **Mean of replic
 (choose which; the caption names it).
 
 **Colours:** click a spectrum in the list and **Colour...** (or double-click it) to choose its colour; the
-small square next to each spectrum shows its colour, and the caption names it (red, blue...). **Reset
-colours** goes back to black (or to colour-blind safe colours in an overlay).
+small square next to each spectrum shows its colour, and the caption names it (red, blue...). **Fit
+colour...** sets the colour of the fitted spectrum (Manchester purple unless you change it), in the fit
+evidence template and when **Draw the fit as well** is ticked. **Reset colours** goes back to black (or to
+colour-blind safe colours in an overlay) and the purple fit.
 
 **2 Region.** The ppm range shown (several pieces are allowed, for example `0.8-1.6, 3.0-4.2`), the regions to
 **Leave out** (drawn as breaks in the axis; the water region is filled in from your run), **Magnify** the

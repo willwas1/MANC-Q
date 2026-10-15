@@ -36,6 +36,7 @@ WIDTHS_MM = {"Single column (85 mm)": 85.0, "1.5 column (120 mm)": 120.0, "Doubl
 SYMBOLS = {"*": "contaminant or poloxamer", "~": "peak cut off at the top of the plot", "#": "13C satellite"}
 MIN_FONT_PT, MIN_LINE_PT = 6.0, 0.25          # preflight: smallest text and thinnest line most journals accept
 # colour-blind safe colours (Okabe and Ito), for overlays and fitted components
+FIT_COLOUR = "#660099"       # Manchester purple: the default colour of the fitted (simulated) spectrum
 COLOURS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9", "#000000", "#F0E442"]
 ABBREV = {
     "L-Lactate": "Lac", "L-Alanine": "Ala", "L-Glutamine": "Gln", "L-Glutamate": "Glu", "D-Glucose": "Glc",
@@ -430,7 +431,7 @@ def default_spec(R=None):
                 clip=False, clip_percent=30, label_style="numbers", label_tiers=["Quantified"], label_which="main",
                 labels=None, fit_metabolites=[], fit_region="", stack_offset=25, inset_region="0.8-1.1",
                 baseline_correct=True, overlay_offset=0, offset_x_ppm=0.0, colours={},
-                show_fit=False, width_mm=180.0, height_mm=90.0, font_pt=7.0, line_pt=0.6, title="")
+                show_fit=False, fit_colour=FIT_COLOUR, width_mm=180.0, height_mm=90.0, font_pt=7.0, line_pt=0.6, title="")
 
 
 def parse_ranges(text):
@@ -728,7 +729,7 @@ def _draw_representative(fig, spec, R, traces, info):
         ax.plot(gx, gy * fac, color=trace_colour(spec, tr, 0, "k"), lw=spec["line_pt"])
         if spec.get("show_fit"):
             gfx, gf = _cut(x, tr["simulated_total"], leave_out=leave)
-            ax.plot(gfx, gf * fac, color=COLOURS[1], lw=spec["line_pt"] * 0.8)
+            ax.plot(gfx, gf * fac, color=spec.get("fit_colour") or FIT_COLOUR, lw=spec["line_pt"] * 0.8)
         ax.set_ylim(-0.02 * top, top * (1 + lab_room))
         _ticks(ax, lo, hi, spec["font_pt"])
         if fac > 1:
@@ -917,7 +918,7 @@ def _draw_fit(fig, spec, R, tr, info):
         o = offsets[0]
         gx, go, gf = _cut(x, obs, fit, leave_out=leave)
         ax.plot(gx, go + o, color=trace_colour(spec, tr, 0, "k"), lw=lw)
-        ax.plot(gx, gf + o, color="#D55E00", lw=lw * 0.9)
+        ax.plot(gx, gf + o, color=spec.get("fit_colour") or FIT_COLOUR, lw=lw * 0.9)
         for k, m in enumerate(mets):
             o = offsets[k + 1]
             gx, gc = _cut(x, tr[m], leave_out=leave)
@@ -971,7 +972,9 @@ def caption(spec, R, traces, info):
     parts = []
     t = spec["template"]
     if t == "representative":
-        parts.append(f"Representative {fld}1H NMR spectrum of {_trace_desc(traces[0])}{pp_txt}.")
+        parts.append(f"Representative {fld}1H NMR spectrum of {_trace_desc(traces[0])}{pp_txt}." +
+                     (f" The fitted spectrum (sum of all metabolites fitted by MANC-Q) is drawn in "
+                      f"{colour_name(spec.get('fit_colour') or FIT_COLOUR)}." if spec.get("show_fit") else ""))
     elif t == "stack":
         cols = [trace_colour(spec, tr, k, "k") for k, tr in enumerate(traces)]
         named = len({c.lower() for c in cols}) > 1 or cols[0].lower() not in ("k", "#000000", "black")
@@ -998,7 +1001,8 @@ def caption(spec, R, traces, info):
         segs = info.get("fit_segments", [])
         rng = " and ".join(f"{_fmt_ppm(lo)} to {_fmt_ppm(hi)} ppm" for lo, hi, _ in sorted(segs))
         parts.append(f"Fit of the {fld}1H NMR spectrum of {_trace_desc(tr)} by MANC-Q {q.__version__}, {rng}. Top: "
-                     f"measured spectrum (black) and the sum of all fitted metabolite spectra (orange), baseline "
+                     f"measured spectrum ({colour_name(trace_colour(spec, tr, 0, 'k'))}) and the sum of all fitted metabolite "
+                     f"spectra ({colour_name(spec.get('fit_colour') or FIT_COLOUR)}), baseline "
                      f"removed. Below: the fitted spectrum of each metabolite on the same vertical scale"
                      + (" (" + "; ".join(f"{plain_name(m)}{'' if not np.isfinite(c) else f', {c:.3g} mM, {tt.lower()}'}"
                                           for m, tt, c in names) + ")" if names else "") +

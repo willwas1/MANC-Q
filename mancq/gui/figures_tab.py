@@ -119,8 +119,12 @@ class FiguresTab(QWidget):
         self.baseline.setToolTip("Draw the spectra after removing the smooth baseline MANC-Q fitted (said in the "
                                  "caption)")
         l2.addWidget(self.baseline, 4, 0, 1, 3)
-        self.show_fit = QCheckBox("Draw the fit as well (orange)")
-        l2.addWidget(self.show_fit, 5, 0, 1, 3)
+        self.show_fit = QCheckBox("Draw the fit as well")
+        l2.addWidget(self.show_fit, 5, 0, 1, 2)
+        self.fit_col = QPushButton("Fit colour...")
+        self.fit_col.setToolTip("Colour of the fitted spectrum (default Manchester purple)")
+        self.fit_col.clicked.connect(self.pick_fit_colour)
+        l2.addWidget(self.fit_col, 5, 2)
         self.stack_lab = QLabel("Offset upwards")
         self.stack_off = QSpinBox(); self.stack_off.setRange(0, 200); self.stack_off.setSuffix(" % of height")
         self.stack_off.setToolTip("How far each spectrum is raised above the one before, as a share of the plot "
@@ -387,6 +391,9 @@ class FiguresTab(QWidget):
         for w in (self.fit_lab, self.fit_mets, self.fit_reg_lab, self.fit_region):
             w.setVisible(t == "fit")
         self.show_fit.setVisible(t == "representative")
+        self.fit_col.setVisible(t in ("representative", "fit"))
+        pm = QPixmap(12, 12); pm.fill(QColor(self.spec.get("fit_colour") or F.FIT_COLOUR))
+        self.fit_col.setIcon(QIcon(pm))
         for w in (self.magnify, self.mag_from, self.mag_factor):
             w.setEnabled(t in ("representative", "stack"))
         self.width.setEnabled(self.width_pre.currentData() is None)
@@ -502,8 +509,15 @@ class FiguresTab(QWidget):
             self.spec.setdefault("colours", {})[key] = c.name()
             self.changed()
 
+    def pick_fit_colour(self):
+        c = QColorDialog.getColor(QColor(self.spec.get("fit_colour") or F.FIT_COLOUR), self, "Colour of the fit")
+        if c.isValid():
+            self.spec["fit_colour"] = c.name()
+            self.changed()
+
     def reset_colours(self):
         self.spec["colours"] = {}
+        self.spec["fit_colour"] = F.FIT_COLOUR
         self.changed()
 
     def tick_all(self, on):

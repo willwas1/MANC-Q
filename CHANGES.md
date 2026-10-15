@@ -2,6 +2,22 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 1.6.0 (15 October 2026)
+
+* **Chemical shift assignment table for publication.** Every run (and every regrade or saved Review
+  adjustment) writes `chemical_shift_assignments.xlsx`: a formatted supplementary table (title, ruled
+  header, footnote) with one row per metabolite, its 1H chemical shifts (fitted multiplet centres, median
+  over the samples where it was reported), `*` on the peaks used to quantify it, `**` on peaks used but
+  shared with another metabolite (Overlapped, semi-quantitative), the number of samples, and the reference
+  spectrum (GISSMO bmse number or CASMDB peak list). The same table is the new `Shift_assignments`
+  sheet of the workbook. It lists metabolites Quantified, Overlapped or Manually adjusted in at least 25 %
+  of the samples (new settings `SHIFT_TABLE_TIERS`, `SHIFT_TABLE_MIN_FRACTION`; the footnote states the
+  rule). No 13C shifts: MANC-Q fits 1H spectra only. New module `mancq/shifttable.py`.
+* **Figures: colour of the fit.** **Fit colour...** sets the colour of the fitted spectrum (fit evidence, and
+  **Draw the fit as well**); the default is now Manchester purple (#660099, was orange). The caption
+  names the colours used.
+* New test `tests/test_shift_table.py` (synthetic data only).
+
 ## 1.5.1 (15 October 2026)
 
 Figures step: colours and offsets.

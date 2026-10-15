@@ -97,7 +97,11 @@ SETTINGS = dict(
     PH_MAX_DISAGREE=0.25,             # H2 and H4 further apart than this (pH units) -> flag "protons_disagree"
     PH_PLACE_HISTIDINE=True,          # fit histidine H2/H4 close to the peaks the pH estimate used
     PH_HIS_PLACE_HZ=3.0,              # ... within this many Hz of the measured peak
-    PH_HIS_PLACE_PREDICTED_HZ=25.0,   # ... or of the position predicted from the other proton, if one was not seen
+    PH_HIS_PLACE_PREDICTED_HZ=25.0,
+    # chemical shift assignment table (chemical_shift_assignments.xlsx): metabolites with a value in these tiers in
+    # at least this share of the samples
+    SHIFT_TABLE_TIERS=["Quantified", "Overlapped (semi-quantitative)", "Manually adjusted"],
+    SHIFT_TABLE_MIN_FRACTION=0.25,   # ... or of the position predicted from the other proton, if one was not seen
 
     # grading
     LOD_SNR=3, LOQ_SNR=10,
@@ -145,7 +149,7 @@ plt = _plt
 
 from .spinsim import simulate_spin_system, merge_sticks
 
-__version__ = "1.5.1"
+__version__ = "1.6.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -1741,7 +1745,7 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
     readme = pd.DataFrame(dict(item=[
         "Software", "Units", "Reference", "How numbers are produced", "Quantified", "Overlapped (semi-quantitative)",
         DECONV, MANUAL, "Upper bound only", "Not detected", "SE", "Library", "Peak_list_by_metabolite",
-        "Observed_peaks_assigned", "QC", "pH estimate", "Manual_edits", "Settings"], text=[
+        "Observed_peaks_assigned", "QC", "pH estimate", "Manual_edits", "Shift_assignments", "Settings"], text=[
         f"MANC-Q {__version__} (https://github.com/willwas1/MANC-Q), results written {time.strftime('%Y-%m-%d %H:%M')}.",
         "mM in the original medium = tube mM x dilution factor (from the dilution file).",
         f"{S['REFERENCE']} internal standard only: {S['TSP_MM_IN_TUBE']} mM in tube, 9 H, area from a pseudo-Voigt fit incl. 29Si satellites. No calibration against any sample or standard.",
@@ -1759,10 +1763,17 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         "Per-sample referencing, linewidth, noise, fit quality, fraction of signal explained, how the spectrum was processed, and the estimated pH.",
         ph_readme() if "pH_est" in Q else "Not estimated: these results were fitted by a MANC-Q version before 1.4.",
         "Every manual adjustment: sample, metabolite, automatic and manual value, shift and linewidth used, note, user and time. Empty if nothing was adjusted.",
+        "Chemical shift assignment table for publication: every metabolite with a value in the tiers SHIFT_TABLE_TIERS in at least SHIFT_TABLE_MIN_FRACTION of the samples (default Quantified, Overlapped or Manually adjusted in 25 %), its 1H shifts (fitted multiplet centres, median over those samples), * = peaks used to quantify it, ** = used but shared with another metabolite (semi-quantitative), the number of samples and the reference spectrum. The same table, formatted for a supplement, is in chemical_shift_assignments.xlsx.",
         json.dumps({k: v for k, v in S.items() if k != "OVERLAY_REGIONS"})]))
     libdf = pd.DataFrame([dict(metabolite=c["name"], cls=c["cls"], source=c["source"], n_protons=c["nprot"],
                                titratable=c["titratable"], n_lines=len(c["ppm"]), n_multiplets=len(c["mults"]),
                                provenance=c["provenance"]) for c in lib])
+    # chemical shift assignment table for publication (also written on its own as chemical_shift_assignments.xlsx)
+    from . import shifttable
+    shifts, shift_note = shifttable.make(out, G, P, Q, lib, __version__, S["REFERENCE"],
+                                         tuple(S["SHIFT_TABLE_TIERS"]), float(S["SHIFT_TABLE_MIN_FRACTION"]))
+    shift_sheet = pd.concat([shifts[shifts.columns[:4]],
+                             pd.DataFrame({"Metabolite": ["", shift_note]})], ignore_index=True)
     xl = os.path.join(out, "metabolite_concentrations.xlsx")
     with pd.ExcelWriter(xl, engine="openpyxl") as xw:
         readme.to_excel(xw, sheet_name="README", index=False)
@@ -1779,6 +1790,7 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         (pd.DataFrame(edits) if edits else pd.DataFrame(dict(note=["No manual adjustments."]))).to_excel(
             xw, sheet_name="Manual_edits", index=False)
         libdf.to_excel(xw, sheet_name="Library", index=False)
+        shift_sheet.to_excel(xw, sheet_name="Shift_assignments", index=False)
         for ws in xw.book.worksheets:
             ws.freeze_panes = "B2"
             for col in ws.columns:
