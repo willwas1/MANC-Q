@@ -145,7 +145,7 @@ plt = _plt
 
 from .spinsim import simulate_spin_system, merge_sticks
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -1108,7 +1108,7 @@ def grade(res, lib, sf, cf):
         if mps and all(m["unit_peak"] <= 0 or _excluded_fraction(m) >= 0.9 for m in mps):
             # every multiplet of this compound lies in an excluded region: nothing to fit
             rows.append(dict(metabolite=c["name"], cls=c["cls"], tier=NOTMEAS, conc_mM=np.nan, se_mM=np.nan,
-                             whole_compound_fit_mM=np.nan, method="all multiplets inside ignored regions",
+                             whole_compound_fit_mM=np.nan, method="all multiplets inside ignored regions", reporter_ppm="",
                              LOD_mM=np.nan, upper_bound_mM=np.nan, snr=0.0, best_dominance=np.nan,
                              best_misfit=np.nan, n_reporters=0, reporter_ratio=np.nan,
                              source=c["source"], provenance=c["provenance"]))
@@ -1234,8 +1234,10 @@ def grade(res, lib, sf, cf):
             else:
                 tier, conc = "Upper bound only", ub if np.isfinite(ub) else conc
                 method = "no usable reporter -> data upper bound"
+        # centre (ppm, as fitted) of the multiplet(s) the value comes from, for the tiers that use reporters
+        rep_ppm = ";".join(f"{float((m['p'] * m['it']).sum() / m['it'].sum() + m['d']):.4f}" for m in use)             if tier in ("Quantified", "Overlapped (semi-quantitative)") else ""
         rows.append(dict(metabolite=c["name"], cls=c["cls"], tier=tier, conc_mM=conc, se_mM=se,
-                         whole_compound_fit_mM=a * cf if a > 0 else 0.0, method=method,
+                         whole_compound_fit_mM=a * cf if a > 0 else 0.0, method=method, reporter_ppm=rep_ppm,
                          LOD_mM=lod, upper_bound_mM=ub, snr=round(snr, 1), best_dominance=round(best_dom, 3),
                          best_misfit=round(best_mis, 3) if np.isfinite(best_mis) else np.nan,
                          n_reporters=len(use), reporter_ratio=round(cross, 3) if np.isfinite(cross) else np.nan,
@@ -1639,6 +1641,8 @@ def apply_manual(out, gr):
         if c not in gr:
             gr[c] = np.nan if c == "auto_conc_mM" else ""
     gr["auto_tier"] = gr["auto_tier"].astype(object)
+    if "reporter_ppm" in gr:
+        gr["reporter_ppm"] = gr["reporter_ppm"].astype(object)
     gr["manual_note"] = gr["manual_note"].astype(object)
     for i in gr.index:
         e = ed.get(gr.at[i, "metabolite"])
@@ -1646,6 +1650,8 @@ def apply_manual(out, gr):
             continue
         gr.at[i, "auto_tier"], gr.at[i, "auto_conc_mM"] = gr.at[i, "tier"], gr.at[i, "conc_mM"]
         gr.at[i, "tier"], gr.at[i, "conc_mM"], gr.at[i, "se_mM"] = MANUAL, float(e["conc_mM"]), np.nan
+        if "reporter_ppm" in gr:
+            gr.at[i, "reporter_ppm"] = ""        # a manual value is the whole compound, not one peak
         how = e.get("reason") or "set by hand"
         gr.at[i, "method"] = f"{how} in the Review step (shift {e.get('shift_Hz', 0):+.2f} Hz, " \
                              f"linewidth x{e.get('width', 1.0):.2f})"
@@ -1739,7 +1745,7 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         f"MANC-Q {__version__} (https://github.com/willwas1/MANC-Q), results written {time.strftime('%Y-%m-%d %H:%M')}.",
         "mM in the original medium = tube mM x dilution factor (from the dilution file).",
         f"{S['REFERENCE']} internal standard only: {S['TSP_MM_IN_TUBE']} mM in tube, 9 H, area from a pseudo-Voigt fit incl. 29Si satellites. No calibration against any sample or standard.",
-        "Whole spectrum fitted as a sum of simulated metabolite spectra + smooth baseline + free unassigned singlets; each multiplet has a small fitted shift and linewidth. Concentration = mean of the cleanly resolved 'reporter' multiplets (each fitted on its own); if none, the whole-compound fit.",
+        "Whole spectrum fitted as a sum of simulated metabolite spectra + smooth baseline + free unassigned singlets; each multiplet has a small fitted shift and linewidth. Concentration = mean of the cleanly resolved 'reporter' multiplets (each fitted on its own); if none, the whole-compound fit. The reporter_ppm column of Long_table gives the fitted centre (ppm) of the reporter multiplet(s) a Quantified or Overlapped value comes from.",
         f"Clean reporter multiplet(s): SNR>={S['LOQ_SNR']}, this metabolite >={S['Q_MIN_DOMINANCE']:.0%} of the fitted signal under it, |observed-fit| <= {S['Q_MAX_MISFIT']} x its own signal, shift not at bound; either two or more reporters agreeing within x{S['MAX_REPORTER_RATIO']}, or one reporter carrying >={S['SINGLE_REPORTER_MIN_SHARE']:.0%} of the protons; no multiplet of the molecule contradicted by the data.",
         f"SNR>={S['LOQ_SNR']} but the best multiplet is shared (dominance {S['O_MIN_DOMINANCE']:.0%}-{S['Q_MIN_DOMINANCE']:.0%}) or misfit <= {S['O_MAX_MISFIT']}. Number depends on the overlap partners: use for trends.",
         f"No multiplet of this metabolite is resolved enough to quantify on its own, but the whole-compound least-squares fit over >={S['DECONV_MIN_MULTIPLETS']} fitted multiplets is well determined (relative SE <= {S['DECONV_MAX_REL_SE']:.0%}) and sits below the data upper bound. The value is that deconvolution estimate, shown with a ~ in Report_mM. It depends on the library explaining the overlapping signals correctly, so treat it as an estimate, not a measurement.",

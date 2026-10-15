@@ -24,8 +24,11 @@ em dashes in anything you write for him.
   `fidproc.py` raw FID processing; `regrade.py`; `results.py`; `demo.py` synthetic demo (one processed
   spectrum, one raw FID); `shortcut.py` Windows desktop shortcut; `__main__.py` command line
   (`mancq` with no arguments opens the window).
-* `mancq/gui/app.py` PySide6 window (6 steps; Process FIDs step only shown when raw FIDs exist);
-  `gui/runner.py` runs the fit in a separate process.
+* `mancq/gui/app.py` PySide6 window (8 steps: Spectra, Process spectra, Regions, Settings, Run, Results,
+  Review, Figures); `gui/runner.py` runs the fit in a separate process; `gui/figures_tab.py` the Figures
+  step, drawn by `mancq/figures.py` (templates, forgiving sample sheet reader, own TIFF writer because
+  Anaconda's Pillow crashes on compressed TIFFs).
+* `tests/`: checks on synthetic data only (`python tests/test_ph_estimate.py`, `python tests/test_figures.py`).
 * `mancq/library/`: `compounds.csv` (149 compounds: 123 GISSMO, 25 CASMDB peak lists, 1 literature spin
   system), `gissmo_spin_systems.txt`, `other_spin_systems.txt`, `peaklists.csv`, `peaklists_manifest.csv`.
 * `MANC-Q.bat` double-click launcher (downloads uv + private Python into `.runtime`); `constraints.txt` exact

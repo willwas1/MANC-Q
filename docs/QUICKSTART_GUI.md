@@ -120,6 +120,11 @@ metabolites with only the values you chose to show.
   (`pH_H2`, `pH_H4`, with a `pH_flag`) are in `qc_per_sample.csv` and the QC sheet of the workbook. MANC-Q also
   uses these peak positions to hold histidine in place in the fit, so it cannot slide onto a neighbouring peak
   (for example tryptophan at 7.74 ppm).
+* **Peak used (ppm):** the first column says where each metabolite is measured: the fitted centre of the
+  peak(s) MANC-Q used for its value (its reporter peaks), as the median over the samples where it was
+  Quantified or Overlapped. Hover over a value to see the peak(s) used in that sample. The same information
+  is in the `reporter_ppm` column of `concentrations_long.csv` and the `Long_table` sheet. Results made
+  before version 1.5 take it from the peak list.
 * **Save this plot...** saves the plot on the right as PNG (300 dpi), SVG (editable) or PDF.
 * **Recent results...** reopens results folders you looked at before.
 
@@ -159,3 +164,59 @@ are then rewritten (in seconds, nothing is refitted). Adjusted values have the t
 automatic tier and value stay in the `Long_table` sheet (columns `auto_tier`, `auto_conc_mM`), and every change
 is listed in the `Manual_edits` sheet. If a spectrum is fitted again later, its adjustments are set aside
 because they refer to the earlier fit.
+
+## 8 Figures
+
+![Figures](images/8_figures.png)
+
+Figures of your spectra for papers, posters and talks, from the results open in step 6 (or **Open a results
+folder...**). Everything is drawn from the spectra MANC-Q fitted: each spectrum is divided by its own TSP
+signal, so all spectra share one vertical scale, and by default the smooth baseline MANC-Q fitted is
+subtracted (untick **Subtract the fitted baseline** to show the spectrum as measured).
+
+**1 What to show.** Pick a **Template**:
+
+| Template | What it shows |
+|---|---|
+| Representative spectrum | one spectrum with numbered or abbreviated peak labels, water region cut out, the weak aromatic region magnified |
+| Fit evidence | the measured spectrum with the total fit, each metabolite you tick on its own row (same scale) and the residual: the figure reviewers ask for when two metabolites overlap (for example lactate and threonine) |
+| Time course (stacked) | several spectra stacked with a small vertical offset, on one scale, labelled on the right |
+| Overlay with inset | several spectra overlaid in colour, with an enlarged inset; a dashed box marks where the inset comes from |
+
+Tick the samples to draw. **Samples and groups...** says which samples belong together: type the **group**
+(condition, reactor, medium...), the **time** and the **replicate** for each EXPNO, paste them from Excel, or
+**Load sample sheet** (CSV or Excel). A sample sheet needs one row per sample; columns can be called `sample` or
+`EXPNO`, `group` or `condition`, `time_h`, `time`, `hours` or `day`, `replicate` or `rep`, and `label`. Times
+can be written 12, 12 h, 0.5 hr, 2 d or day 3. Any other columns (feed, VCD, viability...) are kept. Mistakes
+do not stop it: a sample listed twice, a sample that is not in the results or a time it cannot read is
+reported, and the rest is used. **Save a sheet to fill in** writes a CSV with your samples and their NMR titles
+to complete in Excel. The groups are saved in the results folder (`sample_sheet.csv`).
+
+Replicates of one group at one time become one line: either the **Mean of replicates**, or **One replicate**
+(choose which; the caption names it).
+
+**2 Region.** The ppm range shown (several pieces are allowed, for example `0.8-1.6, 3.0-4.2`), the regions to
+**Leave out** (drawn as breaks in the axis; the water region is filled in from your run), **Magnify** the
+region above a ppm (marked x8 or similar), and **Cut tall peaks** above a share of the tallest one (each cut
+peak is marked ~). Fit evidence has its own list of metabolites and its own ppm range (empty = around the main
+peaks of the metabolites you ticked).
+
+**3 Labels.** Labels come from MANC-Q's own fit: the metabolites graded as you tick (Quantified by default),
+at their fitted peak positions: by default one label per metabolite, at its main peak. **Numbers** puts
+numbers on the plot and the key in the caption; **Abbreviations** writes Lac, Ala, Glc and so on. Crowded
+labels are moved up and joined to their peak by a thin line, and wide multiplets get a bracket. **Edit
+labels...** lets you hide a label, change its text, add a symbol (`*` contaminant or poloxamer, `~` peak cut
+off, `#` 13C satellite; each is explained in the caption), or add your own label at any ppm.
+
+**4 Size and export.** Choose the printed width (single column 85 mm, 1.5 column 120 mm, double column 180 mm,
+or Custom: check your journal), the height, the text size and the line width. The preview is drawn at that
+printed size, and the line under it checks the smallest text and thinnest line (most journals want at least
+6 pt text and 0.25 pt lines). **Export...** saves PDF, SVG (editable in Illustrator or Inkscape), EPS, TIFF
+(1200 dpi) and PNG (600 dpi), and can also save the caption, the data behind the figure (CSV), a processing
+record (which spectra, how they were processed, every setting) and a small Python script that draws the figure
+again.
+
+The **Caption** below the preview is a draft that rewrites itself from the settings: field strength, pulse
+sequence, reference, what was cut out or magnified, the label key. Edit it freely (it then stops rewriting
+itself until you tick **Rewrite from the settings** again) and **Copy caption** into your paper. Your figure
+settings and label edits are kept in the results folder (`figures/figure_settings.json`).

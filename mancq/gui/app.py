@@ -1,8 +1,8 @@
 """
 MANC-Q desktop interface.
 
-Seven steps, one tab each: Spectra -> Process spectra -> Regions -> Settings -> Run -> Results -> Review (manual,
-Chenomx-style adjustment of fitted compounds). The interface is a thin layer over the MANC-Q engine (package mancq):
+Eight steps, one tab each: Spectra -> Process spectra -> Regions -> Settings -> Run -> Results -> Review (manual,
+Chenomx-style adjustment of fitted compounds) -> Figures (publication figures of the spectra, gui/figures_tab.py). The interface is a thin layer over the MANC-Q engine (package mancq):
 everything it does can also be done from the command line (processing with --processing processing_used.csv,
 adjustments with apply-edits), and both give identical numbers.
 """
@@ -1628,12 +1628,15 @@ class ResultsTab(QWidget):
         rows = sorted({i.row() for i in idx}); cols = sorted({i.column() for i in idx})
         G = self.data["long"].set_index(["metabolite", "sample"])
         allowed = self.FILTERS[self.filter.currentIndex()][1] or rs.TIERS[:4]
-        lines = ["metabolite\t" + "\t".join(self.samples[c] for c in cols)]
+        lines = ["metabolite\t" + "\t".join("peak_used_ppm" if c == 0 else self.sample_col(c) for c in cols)]
         for r in rows:
             vals = []
             for c in cols:
-                m, smp = self.mets[r], self.samples[c]
-                if numbers_only:
+                m, smp = self.mets[r], self.sample_col(c)
+                if c == 0:
+                    it = self.table.item(r, 0)
+                    vals.append(it.text() if it else "")
+                elif numbers_only:
                     ok = (m, smp) in G.index and G.loc[(m, smp)].tier in allowed
                     vals.append(f"{G.loc[(m, smp)].conc_mM:.6g}" if ok else "")
                 else:
@@ -1643,10 +1646,9 @@ class ResultsTab(QWidget):
         QApplication.clipboard().setText("\n".join(lines) + "\n")
 
     def save_plot(self):
-        r, c = self.table.currentRow(), self.table.currentColumn()
-        if self.data is None or r < 0 or c < 0:
+        if self.data is None or self.cur is None:
             return
-        name = f"{self.mets[r]}_EXPNO{self.samples[c]}" + ("_2D" if self.dim.checkedId() == 1 else "") + \
+        name = f"{self.cur[0]}_EXPNO{self.cur[1]}" + ("_2D" if self.dim.checkedId() == 1 else "") + \
             ("_whole" if self.span.checkedId() == 1 else "")
         name = name.replace(" ", "_").replace("/", "-")
         f, _ = QFileDialog.getSaveFileName(self, "Save this plot", os.path.join(self.out, name + ".png"),
@@ -1667,15 +1669,28 @@ class ResultsTab(QWidget):
             mets = [m for m in mets if (G[G.metabolite == m].tier != "Not detected").any()]
         self.mets, self.samples = mets, samples
         self.table.clear()
-        self.table.setRowCount(len(mets)); self.table.setColumnCount(len(samples))
+        self.table.setRowCount(len(mets)); self.table.setColumnCount(len(samples) + 1)
         ph = ph_labels(self.data["qc"])
-        self.table.setHorizontalHeaderLabels([f"{s}\n{str(titles.get(s, ''))[:24]}" + (f"\n{ph[s][0]}" if s in ph else "")
+        self.table.setHorizontalHeaderLabels(["Peak used\n(ppm)"] +
+                                             [f"{s}\n{str(titles.get(s, ''))[:24]}" + (f"\n{ph[s][0]}" if s in ph else "")
                                               for s in samples])
+        self.table.horizontalHeaderItem(0).setToolTip(
+            "Where each metabolite's value is measured: the fitted centre (ppm) of the peak(s) MANC-Q used to "
+            "quantify it (its reporter peaks), median over the samples where it was Quantified or Overlapped. "
+            "Hover over a value for the peak used in that sample.")
         for j, s_ in enumerate(samples):
-            self.table.horizontalHeaderItem(j).setToolTip(f"EXPNO {s_}: {titles.get(s_, '')}" +
-                                                          (f"\n{ph[s_][1]}" if s_ in ph else ""))
+            self.table.horizontalHeaderItem(j + 1).setToolTip(f"EXPNO {s_}: {titles.get(s_, '')}" +
+                                                              (f"\n{ph[s_][1]}" if s_ in ph else ""))
         self.table.setVerticalHeaderLabels(mets)
+        rep_met, rep_cell = self.data.get("reporter_met", {}), self.data.get("reporter_cell", {})
         for i, m in enumerate(mets):
+            peaks_ = [p for p in rep_met.get(m, "").split(", ") if p]
+            it = QTableWidgetItem(", ".join(peaks_[:2]) + (f" +{len(peaks_) - 2}" if len(peaks_) > 2 else ""))
+            it.setTextAlignment(Qt.AlignCenter)
+            it.setForeground(QBrush(QColor("#111827")))
+            it.setToolTip(f"{m}: measured at {rep_met[m]} ppm (reporter peak centre, median over samples)"
+                          if rep_met.get(m) else f"{m}: no Quantified or Overlapped value, so no reporter peak")
+            self.table.setItem(i, 0, it)
             for j, s in enumerate(samples):
                 if (m, s) not in key.index:
                     continue
@@ -1698,18 +1713,26 @@ class ResultsTab(QWidget):
                     it.setBackground(QBrush(QColor(TIER_COL.get(t, "#ffffff"))))
                     it.setForeground(QBrush(QColor(TIER_TXT.get(t, "#111827"))))
                 tip = f"{m}, EXPNO {s}: {t}, {r.method}"
+                if (m, s) in rep_cell:
+                    tip += f"\nMeasured at: {', '.join(f'{p:.3f}' for p in rep_cell[(m, s)])} ppm"
                 if t == "Manually adjusted" and "auto_tier" in r:
                     tip += f"\nAutomatic: {r.auto_tier}, {r.auto_conc_mM:.3g} mM"
                 it.setToolTip(tip)
-                self.table.setItem(i, j, it)
+                self.table.setItem(i, j + 1, it)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         if mets and samples:
-            self.table.setCurrentCell(0, 0)
+            self.table.setCurrentCell(0, 1)
+
+    def sample_col(self, c):
+        """The sample shown in table column c (column 0 is the peak position), or None."""
+        return self.samples[c - 1] if 1 <= c <= len(self.samples) else None
 
     def cell(self, r, c):
-        if self.data is None or r < 0 or c < 0 or r >= len(self.mets) or c >= len(self.samples):
+        if self.data is not None and c == 0 and self.samples:
+            c = 1 if self.cur is None or self.cur[1] not in self.samples else self.samples.index(self.cur[1]) + 1
+        if self.data is None or r < 0 or r >= len(self.mets) or self.sample_col(c) is None:
             self.cur = None; self.canvas.fig.clear(); self.canvas.draw(); return
-        self.cur = (self.mets[r], self.samples[c])
+        self.cur = (self.mets[r], self.sample_col(c))
         self.fill_peaks()
         self.draw_plot()
 
@@ -2017,13 +2040,15 @@ class ResultsTab(QWidget):
         if m not in self.mets:
             self.filter.setCurrentIndex(0)
         if m in self.mets:
-            self.table.setCurrentCell(self.mets.index(m), self.samples.index(self.cur[1]))
+            self.table.setCurrentCell(self.mets.index(m), self.samples.index(self.cur[1]) + 1)
 
     def review(self, r, c):
-        if self.data is None or not (0 <= r < len(self.mets)) or not (0 <= c < len(self.samples)):
+        if c == 0 and self.cur is not None:
+            c = self.samples.index(self.cur[1]) + 1
+        if self.data is None or not (0 <= r < len(self.mets)) or self.sample_col(c) is None:
             return
         self.win.tabs.setCurrentWidget(self.win.review_tab)
-        self.win.review_tab.open(self.out, self.samples[c], self.mets[r])
+        self.win.review_tab.open(self.out, self.sample_col(c), self.mets[r])
 
     def open_xlsx(self):
         if self.out:
@@ -2034,9 +2059,8 @@ class ResultsTab(QWidget):
             open_path(self.out)
 
     def open_overlay(self):
-        c = self.table.currentColumn()
-        if self.out and 0 <= c < len(self.samples):
-            f = os.path.join(self.out, f"overlay_sample_{self.samples[c]}.pdf")
+        if self.out and self.cur is not None:
+            f = os.path.join(self.out, f"overlay_sample_{self.cur[1]}.pdf")
             if os.path.exists(f):
                 open_path(f)
             else:
@@ -2776,9 +2800,12 @@ class MainWindow(QMainWindow):
         self.run_tab = RunTab(self)
         self.results_tab = ResultsTab(self)
         self.review_tab = ReviewTab(self)
+        from mancq.gui.figures_tab import FiguresTab
+        self.figures_tab = FiguresTab(self)
         for w, lab in [(self.spectra_tab, "1  Spectra"), (self.process_tab, "2  Process spectra"),
                        (self.regions_tab, "3  Regions"), (self.settings_tab, "4  Settings"),
-                       (self.run_tab, "5  Run"), (self.results_tab, "6  Results"), (self.review_tab, "7  Review")]:
+                       (self.run_tab, "5  Run"), (self.results_tab, "6  Results"), (self.review_tab, "7  Review"),
+                       (self.figures_tab, "8  Figures")]:
             self.tabs.addTab(w, lab)
         self.renumber_steps()
         self.tabs.currentChanged.connect(self.tab_changed)

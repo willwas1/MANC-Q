@@ -21,7 +21,47 @@ def load(out):
     good = G[G.tier.isin(TIERS[:4])]
     order = good.groupby("metabolite").conc_mM.median().sort_values(ascending=False).index.tolist()
     rest = [m for m in dict.fromkeys(G.metabolite) if m not in order]
-    return dict(long=G, qc=Q, samples=samples, metabolites=order + rest)
+    per_cell, per_met = reporter_peaks(out, G)
+    return dict(long=G, qc=Q, samples=samples, metabolites=order + rest, reporter_cell=per_cell, reporter_met=per_met)
+
+
+def reporter_peaks(out, G):
+    """Where each value was measured: {(metabolite, sample): [ppm, ...]} for Quantified and Overlapped values (the
+    fitted centre of the reporter multiplets), and {metabolite: "1.331" or "3.776, 3.752"}: the usual reporter
+    peak(s), median over the samples (peaks used in at least a quarter of them). Results written before MANC-Q 1.5
+    have no reporter_ppm column; it is then taken from the peak list."""
+    use = G[G.tier.isin(TIERS[:2])]
+    cell = {}
+    if "reporter_ppm" in G:
+        for r in use.itertuples():
+            v = [float(t) for t in str(r.reporter_ppm).split(";") if t.strip() not in ("", "nan")]
+            if v:
+                cell[(r.metabolite, r.sample)] = v
+    else:
+        f = os.path.join(out, "peak_list_by_metabolite.csv")
+        if os.path.exists(f):
+            P = pd.read_csv(f, dtype={"sample": str})
+            P = P[P.used_as_reporter.astype(bool)]
+            ok = set(zip(use.metabolite, use["sample"]))
+            for (m, s), sub in P.groupby(["metabolite", "sample"]):
+                if (m, s) in ok:
+                    cell[(m, s)] = sorted(sub.centre_ppm.astype(float), reverse=True)
+    met = {}
+    by_met = {}
+    for (m, s), v in cell.items():
+        by_met.setdefault(m, []).append(v)
+    for m, lists in by_met.items():
+        # peaks within 0.01 ppm of each other (the same peak in different samples) form one group
+        groups, cur = [], []
+        for p in sorted(p for v in lists for p in v):
+            if cur and p - cur[-1] > 0.01:
+                groups.append(cur); cur = []
+            cur.append(p)
+        if cur:
+            groups.append(cur)
+        keep = [np.median(v) for v in groups if len(v) >= max(1, 0.25 * len(lists))]
+        met[m] = ", ".join(f"{p:.3f}" for p in sorted(keep, reverse=True))
+    return cell, met
 
 
 def metabolite_window(out, sample, metabolite, pad=0.012, min_half=0.018):

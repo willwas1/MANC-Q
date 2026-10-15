@@ -92,7 +92,7 @@ then says PySide6 is missing, run `python -m pip install PySide6-Essentials` and
 
 ## Your first analysis
 
-MANC-Q opens on the first of seven tabs. The full guide with pictures is in
+MANC-Q opens on the first of eight tabs. The full guide with pictures is in
 [docs/QUICKSTART_GUI.md](docs/QUICKSTART_GUI.md), and the **Help** button on each tab shows its part of it.
 MANC-Q remembers your settings from the last session.
 
@@ -110,6 +110,8 @@ MANC-Q remembers your settings from the last session.
 7. **Review.** Optional: look at each compound drawn over the measured spectrum and, where the automatic fit
    is wrong, drag it to the right height and position (or type the values), as in Chenomx. **Save adjustments
    and update results** rewrites the tables and overlays.
+8. **Figures.** Optional: figures of your spectra for papers (labelled spectrum, fit evidence, time course,
+   overlay), exported at journal sizes with a draft caption.
 
 ## What your data needs to be
 
@@ -232,6 +234,21 @@ Actions tab). To build on your own PC instead, run `packaging\build_windows.bat`
 5. Each compound's concentration is taken from its cleanly resolved multiplets, fitted individually; the tier is
    assigned from signal-to-noise, how much of the local signal is the compound's own, how well it fits, and
    whether every multiplet the compound should produce is actually there.
+
+### Where each value is measured
+
+`concentrations_long.csv` (and the `Long_table` sheet) has a `reporter_ppm` column: the fitted centre of the
+peak(s) each Quantified or Overlapped value comes from. The Results step shows it as its first column,
+**Peak used (ppm)**.
+
+### Figures for papers
+
+Step 8 of the window, **Figures**, draws publication figures from a results folder: a representative spectrum
+with numbered or abbreviated peak labels (key in the caption), fit evidence (measured, fit, each metabolite and
+the residual), a stacked time course, and an overlay with a zoomed inset. Replicates can be averaged or one
+chosen, from groups typed in or loaded from a forgiving sample sheet (CSV or Excel). It writes PDF, SVG, EPS,
+TIFF (1200 dpi) and PNG at journal column widths, checks text and line sizes, and drafts the caption. See the
+quick start guide, step 8. From Python: `mancq.figures`.
 
 ### Estimated pH
 

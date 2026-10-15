@@ -2,6 +2,50 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 1.5.0 (15 October 2026)
+
+A new step for publication figures, and the Results table now says where each value is measured. The fitting
+itself is unchanged.
+
+**Figures (new step 8, `mancq/figures.py`, `mancq/gui/figures_tab.py`)**
+
+* Four templates, following the figure forms seen in published 1H NMR papers on media and biofluids:
+  representative spectrum (water region cut out as an axis break, aromatic region magnified xN, numbered or
+  abbreviated peak labels with the key in the caption, tall peaks cut off and marked ~); fit evidence (measured
+  spectrum and total fit, each chosen metabolite on its own row on the same scale, residual); time course
+  (spectra stacked with a small offset on one scale); overlay in colour with a zoomed inset and a dashed box
+  marking its region.
+* Spectra are the ones MANC-Q fitted, each divided by its own TSP area so all share one vertical scale; the
+  smooth fitted baseline is subtracted by default (said in the caption).
+* Groups: replicates of one group and time point become one line, either their mean or one chosen replicate.
+  Groups are typed in (or pasted from Excel) in **Samples and groups...**, or read from a sample sheet (CSV or
+  Excel) that is forgiving: column names in many spellings (EXPNO or sample, group or condition or reactor,
+  time or hours or day, replicate or rep), times as 12, 12 h, 2 d or day 3, any delimiter or encoding; samples
+  listed twice, samples not in the results and unreadable times are reported and the rest is used; extra
+  bioprocess columns are kept. Saved as `sample_sheet.csv` in the results folder.
+* Labels come from MANC-Q's own fit (metabolites in the tiers you tick, at their fitted peak positions; one
+  per metabolite by default), are moved up with leader lines where crowded, get brackets over wide
+  multiplets, and can be edited: hide, change the text, add symbols (* contaminant, ~ cut-off peak,
+  # 13C satellite, each explained in the caption) or your own labels.
+* Export at journal column widths (85, 120, 180 mm or custom) as PDF, SVG, EPS, TIFF (1200 dpi, Deflate
+  compressed, written by MANC-Q itself because the TIFF writer of some Pillow builds, including Anaconda's,
+  crashes on compressed TIFFs) and PNG (600 dpi), optionally with the caption, the data behind the figure
+  (CSV), a processing record and a Python script that redraws it. A preflight line checks the smallest text
+  and thinnest line at the printed size.
+* A draft caption writes itself from the settings (field, pulse sequence, reference, cut and magnified
+  regions, label key) and can be edited and copied.
+
+**Where each value is measured**
+
+* New column `reporter_ppm` in `concentrations_long.csv` and the `Long_table` sheet: the fitted centre (ppm)
+  of the reporter peak(s) each Quantified or Overlapped value comes from (blank for other tiers and for manual
+  values).
+* The Results step has a first column **Peak used (ppm)**: the usual reporter peak(s) of each metabolite
+  (median over samples); hovering over a value shows the peak(s) used in that sample. Results from earlier
+  versions take this from the peak list.
+
+* New tests on synthetic data only: `tests/test_figures.py`.
+
 ## 1.4.0 (15 October 2026)
 
 MANC-Q now estimates the pH of every sample from its spectrum, and uses it to keep histidine on the right peaks.
