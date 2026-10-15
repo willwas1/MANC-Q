@@ -111,6 +111,15 @@ metabolites with only the values you chose to show.
   identity only: it never changes a value. Seen cross peaks support an assignment; missing ones on a strong
   metabolite deserve a look; weak metabolites may simply be too weak for the 2D. Compounds from fixed peak
   lists and singlets (for example formate, acetate) have no cross peaks to check.
+* **Estimated pH:** under each sample name the table shows `pH ~7.05 (estimate)`: the pH in the NMR tube when
+  the spectrum was recorded (not in the culture), worked out from where the two histidine ring peaks sit (H2 near
+  7.8 ppm, H4 near 7.05 ppm; they move with pH). Hover over the sample name to see how it was found. It is an
+  estimate: changes between samples are reliable, but the absolute value is only good to about plus or minus
+  0.2 units, because the constants used (from free histidine in water) were not measured in your medium. It needs
+  histidine peaks at least 10 x the noise; otherwise it shows `pH n/a`. The values and the two separate readings
+  (`pH_H2`, `pH_H4`, with a `pH_flag`) are in `qc_per_sample.csv` and the QC sheet of the workbook. MANC-Q also
+  uses these peak positions to hold histidine in place in the fit, so it cannot slide onto a neighbouring peak
+  (for example tryptophan at 7.74 ppm).
 * **Save this plot...** saves the plot on the right as PNG (300 dpi), SVG (editable) or PDF.
 * **Recent results...** reopens results folders you looked at before.
 

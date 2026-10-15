@@ -203,6 +203,25 @@ def tidy(ax):
     ax.set_yticks([])
 
 
+PH_FLAG_TEXT = {"ok": "H2 and H4 agree", "one_proton_only": "from one histidine peak only",
+                "protons_disagree": "H2 and H4 disagree, treat with care", "no_histidine": "no histidine peak found"}
+
+
+def ph_labels(qc):
+    """{sample: (short label, tooltip)} for the estimated pH in the QC table (results from 1.4.0 on)."""
+    out = {}
+    if qc is None or "pH_est" not in qc:
+        return out
+    for _, r in qc.iterrows():
+        v, flag = r.get("pH_est"), str(r.get("pH_flag", ""))
+        short = f"pH ~{v:.2f} (estimate)" if pd.notna(v) else "pH n/a"
+        tip = (f"Estimated pH in the NMR tube: {v:.2f} " if pd.notna(v) else "pH could not be estimated: ") + \
+            f"({PH_FLAG_TEXT.get(flag, flag)}). From the histidine H2/H4 peak positions; changes between samples " \
+            f"are reliable, the absolute value only to about +/-0.2."
+        out[str(r["sample"])] = (short, tip)
+    return out
+
+
 def scan_folder(folder, procno):
     """Every EXPNO folder with a processed spectrum and/or an FID."""
     out = []
@@ -1649,9 +1668,12 @@ class ResultsTab(QWidget):
         self.mets, self.samples = mets, samples
         self.table.clear()
         self.table.setRowCount(len(mets)); self.table.setColumnCount(len(samples))
-        self.table.setHorizontalHeaderLabels([f"{s}\n{str(titles.get(s, ''))[:24]}" for s in samples])
+        ph = ph_labels(self.data["qc"])
+        self.table.setHorizontalHeaderLabels([f"{s}\n{str(titles.get(s, ''))[:24]}" + (f"\n{ph[s][0]}" if s in ph else "")
+                                              for s in samples])
         for j, s_ in enumerate(samples):
-            self.table.horizontalHeaderItem(j).setToolTip(f"EXPNO {s_}: {titles.get(s_, '')}")
+            self.table.horizontalHeaderItem(j).setToolTip(f"EXPNO {s_}: {titles.get(s_, '')}" +
+                                                          (f"\n{ph[s_][1]}" if s_ in ph else ""))
         self.table.setVerticalHeaderLabels(mets)
         for i, m in enumerate(mets):
             for j, s in enumerate(samples):
@@ -2268,8 +2290,9 @@ class ReviewTab(QWidget):
             data = rs.load(out)
             self.sample.blockSignals(True); self.sample.clear()
             titles = dict(zip(data["qc"]["sample"], data["qc"].get("title", pd.Series(dtype=str)).fillna("")))
+            ph = ph_labels(data["qc"])
             for s in data["samples"]:
-                self.sample.addItem(f"{s}  {str(titles.get(s, ''))[:30]}", s)
+                self.sample.addItem(f"{s}  {str(titles.get(s, ''))[:30]}" + (f"  {ph[s][0]}" if s in ph else ""), s)
             self.sample.blockSignals(False)
             self.where.setText(f"Results folder: {out}")
             self.sample_changed()

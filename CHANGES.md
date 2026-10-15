@@ -2,6 +2,31 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 1.4.0 (15 October 2026)
+
+MANC-Q now estimates the pH of every sample from its spectrum, and uses it to keep histidine on the right peaks.
+
+* **Estimated pH.** The histidine ring singlets H2 (looked for in 7.70 to 7.96 ppm) and H4 (7.00 to 7.12 ppm)
+  move with pH. Each peak top is found on the TSP-referenced axis, refined with a 3-point parabola, used only if
+  at least 10 x noise, and converted to pH with Henderson-Hasselbalch (pKa 6.05; H2 8.66 / 7.70 ppm and H4
+  7.39 / 7.02 ppm protonated / deprotonated, approximate literature values for free histidine in water, 25 C).
+  `pH_est` is the mean of the two. If a window holds more than one peak (for example the tryptophan doublet at
+  7.74 ppm) and the tallest peaks disagree, the pair of peaks that agree is used. New columns in
+  `qc_per_sample.csv` and the QC sheet: `pH_est`, `pH_H2`, `pH_H4`, `his_H2_ppm`, `his_H4_ppm`, `pH_flag`
+  (`ok`, `one_proton_only`, `protons_disagree` when more than 0.25 apart, `no_histidine`). The constants are
+  settings (`PH_HIS_PKA`, `PH_HIS_H2_LIMITS`, `PH_HIS_H4_LIMITS`, ...) so a titration in your own medium can
+  replace them. It is the pH in the NMR tube at acquisition and an estimate: trends are reliable, absolute pH
+  about plus or minus 0.2. The README sheet, the run log, the help and README.md say so.
+* **Results and Review steps** show `pH ~7.05 (estimate)` under each sample name (hover for details).
+* **Histidine placed from its measured peaks** (setting `PH_PLACE_HISTIDINE`, on by default). When the pH
+  could be estimated, histidine H2 and H4 are kept within 3 Hz of the peaks the estimate used (25 Hz of the
+  position predicted from the other proton if one peak was too weak), instead of the 60 Hz freedom per
+  multiplet they had, which let them jump onto a neighbouring peak. The shift of the molecule as a whole (which
+  places its CH2 and CH peaks) is still chosen as before. Without an estimate nothing changes. The fitting of
+  other compounds is unchanged, but because histidine now sits differently in some spectra, nearby and weak
+  compounds can move a little: Quantified values hardly at all, weak ones sometimes change tier.
+* New test on synthetic spectra only: `python -m pytest tests` (or `python tests/test_ph_estimate.py`).
+
 ## 1.3.1 (9 October 2026)
 
 * **Try the demo** now rebuilds a demo folder made before 1.3 (it had no 2D), so the demo TOCSY (EXPNO 12) is

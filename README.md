@@ -233,11 +233,22 @@ Actions tab). To build on your own PC instead, run `packaging\build_windows.bat`
    assigned from signal-to-noise, how much of the local signal is the compound's own, how well it fits, and
    whether every multiplet the compound should produce is actually there.
 
+### Estimated pH
+
+`qc_per_sample.csv` (and the QC sheet) also gives `pH_est`, an estimate of the pH in the NMR tube when the
+spectrum was recorded, from the positions of the two histidine ring peaks (H2 near 7.8 ppm, H4 near 7.05 ppm),
+with `pH_H2` and `pH_H4` from each peak alone, the peak positions, and `pH_flag` (`ok`, `one_proton_only`,
+`protons_disagree`, `no_histidine`). This is useful when samples are not buffered, so the tube pH follows the
+culture. It is an estimate: changes between samples are reliable, but the absolute pH is only good to about
+plus or minus 0.2 units, because the constants (free histidine in water, 25 C; `PH_HIS_*` in the settings) were
+not measured in your medium. It needs histidine peaks at least 10 x the noise. MANC-Q also uses these peak
+positions to keep histidine on the right peaks in the fit (setting `PH_PLACE_HISTIDINE`).
+
 ## Known limitations
 
 * Matrix effects on chemical shift are only partly absorbed by the shift freedom. Citrate in media containing
-  Ca²⁺/Mg²⁺ is a known failure (its AB pattern changes shape); histidine and other pH-sensitive compounds move
-  between samples.
+  Ca²⁺/Mg²⁺ is a known failure (its AB pattern changes shape); other pH-sensitive compounds move between
+  samples. Histidine is placed from its own measured peaks when the pH can be estimated (from version 1.4).
 * Compounds sharing an identical singlet (for example the N(CH₃)₃ group of choline, phosphocholine, betaine,
   acetylcholine and carnitine near 3.2 ppm, or creatine and creatinine near 3.03 ppm) cannot always be separated.
   In the synthetic demo one or two singlet compounds can read 10 to 30 % low while still graded Quantified,

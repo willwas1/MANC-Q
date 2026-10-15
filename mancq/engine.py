@@ -85,6 +85,20 @@ SETTINGS = dict(
     COMPOUND_TIE=0.3,             # soft constraint: equal per-proton amplitude of multiplets in a compound
     MAX_UNKNOWNS=300,
 
+    # sample pH estimate from the histidine imidazole singlets (H2 near 7.8 ppm, H4 near 7.05 ppm). It is the pH in
+    # the NMR tube at acquisition, an ESTIMATE: trends are reliable, absolute pH about +/-0.2 with these constants
+    PH_ESTIMATE=True,
+    PH_HIS_PKA=6.05,                  # imidazole pKa of free histidine (approximate literature value, water, 25 C)
+    PH_HIS_H2_LIMITS=(8.66, 7.70),    # H2 shift (ppm) fully protonated, fully deprotonated
+    PH_HIS_H4_LIMITS=(7.39, 7.02),    # H4 shift (ppm) fully protonated, fully deprotonated
+    PH_HIS_H2_WINDOW=(7.70, 7.96),    # where the H2 peak is looked for (ppm; covers about pH 6.5 and up)
+    PH_HIS_H4_WINDOW=(7.00, 7.12),    # where the H4 peak is looked for (ppm)
+    PH_MIN_SNR=10,                    # a proton is used only if its peak is at least this x noise
+    PH_MAX_DISAGREE=0.25,             # H2 and H4 further apart than this (pH units) -> flag "protons_disagree"
+    PH_PLACE_HISTIDINE=True,          # fit histidine H2/H4 close to the peaks the pH estimate used
+    PH_HIS_PLACE_HZ=3.0,              # ... within this many Hz of the measured peak
+    PH_HIS_PLACE_PREDICTED_HZ=25.0,   # ... or of the position predicted from the other proton, if one was not seen
+
     # grading
     LOD_SNR=3, LOQ_SNR=10,
     Q_MIN_DOMINANCE=0.60, Q_MAX_MISFIT=0.25, MAX_REPORTER_RATIO=2.0,
@@ -131,7 +145,7 @@ plt = _plt
 
 from .spinsim import simulate_spin_system, merge_sticks
 
-__version__ = "1.3.1"
+__version__ = "1.4.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -290,6 +304,94 @@ def fit_tsp(ppm, y, sf):
     resid = np.sqrt(np.mean(r.fun ** 2)) / h
     area_total = A / (1 - fsi)          # main + 29Si satellites = all TSP protons
     return dict(centre=c, fwhm_hz=f, eta=eta, area_main=A, area=area_total, height=h, rel_rms=resid, jsi=jsi)
+
+
+# =============================================================================
+# 2b. Sample pH estimate (histidine imidazole H2 and H4)
+# =============================================================================
+PH_COLUMNS = ("pH_est", "pH_H2", "pH_H4", "his_H2_ppm", "his_H4_ppm", "pH_flag")
+
+
+def ph_from_shift(d_obs, limits, pka):
+    """Henderson-Hasselbalch: pH from an observed shift, limits = (shift protonated, shift deprotonated)."""
+    d_ha, d_a = limits
+    f = np.clip((d_ha - d_obs) / (d_ha - d_a), 0.001, 0.999)       # fraction deprotonated
+    return float(pka + np.log10(f / (1 - f)))
+
+
+def shift_from_ph(ph, limits, pka):
+    """The shift Henderson-Hasselbalch predicts at a given pH (inverse of ph_from_shift)."""
+    d_ha, d_a = limits
+    f = 1.0 / (1.0 + 10 ** (pka - ph))
+    return float(d_ha - f * (d_ha - d_a))
+
+
+def _peak_candidates(ppm, y, sigma, window):
+    """Peaks in a ppm window at least PH_MIN_SNR x noise tall: [(position, height SNR)], position refined with a
+    3-point parabola through the maximum. ppm must be ascending and evenly spaced."""
+    lo, hi = window
+    idx = np.where((ppm >= lo) & (ppm <= hi))[0]
+    if idx.size < 5:
+        return []
+    base = float(np.percentile(y[idx], 10))          # local baseline under the window
+    pk, _ = find_peaks(y[idx] - base, height=S["PH_MIN_SNR"] * sigma)
+    out = []
+    for p in pk:
+        i = idx[p]
+        y0, y1, y2 = y[i - 1], y[i], y[i + 1]
+        den = y0 - 2 * y1 + y2
+        delta = 0.5 * (y0 - y2) / den if den < 0 else 0.0
+        delta = float(np.clip(delta, -0.5, 0.5))
+        pos = ppm[i] + delta * (ppm[i + 1] - ppm[i])
+        height = y1 - 0.25 * (y0 - y2) * delta - base
+        out.append((float(pos), float(height / sigma)))
+    return out
+
+
+def estimate_ph(ppm, y, sigma):
+    """Estimated pH in the NMR tube from the histidine H2 and H4 singlets (TSP-referenced ppm, ascending).
+    Returns pH_est (mean of the protons found), pH_H2, pH_H4, his_H2_ppm, his_H4_ppm and pH_flag
+    (ok / one_proton_only / protons_disagree / no_histidine). An estimate: see the PH_ settings."""
+    pka, l2, l4 = S["PH_HIS_PKA"], tuple(S["PH_HIS_H2_LIMITS"]), tuple(S["PH_HIS_H4_LIMITS"])
+    c2 = _peak_candidates(ppm, y, sigma, S["PH_HIS_H2_WINDOW"])
+    c4 = _peak_candidates(ppm, y, sigma, S["PH_HIS_H4_WINDOW"])
+    h2 = max(c2, key=lambda c: c[1]) if c2 else None        # tallest peak in each window
+    h4 = max(c4, key=lambda c: c[1]) if c4 else None
+    if h2 and h4 and abs(ph_from_shift(h2[0], l2, pka) - ph_from_shift(h4[0], l4, pka)) > S["PH_MAX_DISAGREE"]:
+        # the tallest peaks disagree: a neighbour (e.g. the Trp doublet at 7.74 ppm) may have been taken.
+        # Prefer the pair of peaks that agree, the stronger pair if several do
+        ok = [(a, b) for a in c2 for b in c4
+              if abs(ph_from_shift(a[0], l2, pka) - ph_from_shift(b[0], l4, pka)) <= S["PH_MAX_DISAGREE"]]
+        if ok:
+            h2, h4 = max(ok, key=lambda ab: min(ab[0][1], ab[1][1]))
+    p2 = ph_from_shift(h2[0], l2, pka) if h2 else np.nan
+    p4 = ph_from_shift(h4[0], l4, pka) if h4 else np.nan
+    have = [v for v in (p2, p4) if np.isfinite(v)]
+    if not have:
+        flag = "no_histidine"
+    elif len(have) == 1:
+        flag = "one_proton_only"
+    else:
+        flag = "protons_disagree" if abs(p2 - p4) > S["PH_MAX_DISAGREE"] else "ok"
+    return dict(pH_est=round(float(np.mean(have)), 3) if have else np.nan,
+                pH_H2=round(p2, 3) if h2 else np.nan, pH_H4=round(p4, 3) if h4 else np.nan,
+                his_H2_ppm=round(h2[0], 5) if h2 else np.nan, his_H4_ppm=round(h4[0], 5) if h4 else np.nan,
+                pH_flag=flag)
+
+
+def histidine_targets(ph):
+    """{'H2'|'H4': (target ppm, half window Hz)} for placing histidine in the fit from a pH estimate: the
+    measured peak where it was seen, else the position the other proton's pH predicts (wider window)."""
+    out = {}
+    if not ph or not np.isfinite(ph.get("pH_est", np.nan)):
+        return out
+    for tag, lim in (("H2", S["PH_HIS_H2_LIMITS"]), ("H4", S["PH_HIS_H4_LIMITS"])):
+        meas = ph.get(f"his_{tag}_ppm", np.nan)
+        if np.isfinite(meas):
+            out[tag] = (float(meas), S["PH_HIS_PLACE_HZ"])
+        else:
+            out[tag] = (shift_from_ph(ph["pH_est"], tuple(lim), S["PH_HIS_PKA"]), S["PH_HIS_PLACE_PREDICTED_HZ"])
+    return out
 
 
 # =============================================================================
@@ -532,6 +634,11 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
     eta = float(np.clip(tsp["eta"], 0.3, 1.0))
     log(f"   {S['REFERENCE']}: area={tsp['area']:.4g}  fwhm={tsp['fwhm_hz']:.2f} Hz  eta={tsp['eta']:.2f}  "
         f"rel.rms={tsp['rel_rms']:.3f}  noise sigma={sigma:.4g}  SNR(TSP)={tsp['height']/sigma:.0f}")
+    ph = estimate_ph(ppm, y, sigma) if S["PH_ESTIMATE"] else dict({k: np.nan for k in PH_COLUMNS}, pH_flag="not_estimated")
+    if S["PH_ESTIMATE"]:
+        log(f"   pH estimate (histidine, estimate only): {ph['pH_est']:.2f}  H2 {ph['his_H2_ppm']:.4f} ppm -> "
+            f"{ph['pH_H2']:.2f}, H4 {ph['his_H4_ppm']:.4f} ppm -> {ph['pH_H4']:.2f}  ({ph['pH_flag']})")
+    his_win = histidine_targets(ph) if S["PH_PLACE_HISTIDINE"] else {}
 
     lo, hi = S["FIT_RANGE"]
     mask = (ppm > lo) & (ppm < hi)
@@ -590,8 +697,17 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
         if c["source"] == "polymer":
             DMAX[k], DLT[k] = c.get("dmax_hz", 3.0) / sf, 0.5 / sf
         for j, m in enumerate(c["mults"]):
-            MP.append(dict(k=k, j=j, p=m["ppm"], it=m["inten"], nprot=m["nprot"], base=base,
-                           d=base, dlo=base - DLT[k], dhi=base + DLT[k],
+            # histidine H2/H4 with a pH estimate: kept within a few Hz of the measured peak (absolute window on d),
+            # so they cannot move onto a neighbour's peak; the compound shift is still chosen as for other compounds
+            win = None
+            if c["name"] == "L-Histidine" and his_win:
+                for tag in ("H2", "H4"):
+                    lo_, hi_ = S[f"PH_HIS_{tag}_WINDOW"]
+                    if tag in his_win and lo_ <= m["centre"] <= hi_:
+                        tgt, hw = his_win[tag]
+                        win = (tgt - m["centre"] - hw / sf, tgt - m["centre"] + hw / sf)
+            MP.append(dict(k=k, j=j, p=m["ppm"], it=m["inten"], nprot=m["nprot"], base=base, win=win,
+                           d=base, dlo=base - DLT[k] if win is None else win[0], dhi=base + DLT[k] if win is None else win[1],
                            wf=c.get("wf0", 1.0), wlo=c.get("wlo", 0.5), whi=c.get("whi", 4.0),
                            titr=c["titratable"], local_amp=np.nan, local_se=np.nan,
                            loc_dom=0.0, loc_mis=np.inf, loc_h=0.0))
@@ -817,13 +933,26 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
                 Dk[k] = best[1]
                 for i, dl in zip(ii, deltas):
                     MP[i]["d"] = MP[i]["base"] + Dk[k] + dl
-                fit[sup] = fit[sup] - own + best[2] * best[3]
-            # pH-sensitive compounds: each multiplet may move further on its own
-            if DLT[k] > 2.0 / sf:
+                    if MP[i]["win"]:          # the compound shift is chosen as usual; held multiplets stay in their window
+                        MP[i]["d"] = float(np.clip(MP[i]["d"], *MP[i]["win"]))
+                col = best[3]
+                if any(MP[i]["win"] for i in ii):
+                    col = sum(ra * mcol(xs, MP[i]["p"], MP[i]["it"], MP[i]["d"], fw0 * MP[i]["wf"], eta)
+                              for i, ra in zip(ii, rel_amp))
+                fit[sup] = fit[sup] - own + best[2] * col
+            # pH-sensitive compounds: each multiplet may move further on its own (multiplets held near a
+            # measured peak move only inside their own window)
+            if DLT[k] > 2.0 / sf or any(MP[i]["win"] for i in ii):
                 for i in ii:
                     m = MP[i]
-                    lo_ = np.searchsorted(x, m["p"].min() + m["base"] + Dk[k] - DLT[k] - HALF_WIN / 2)
-                    hi_ = np.searchsorted(x, m["p"].max() + m["base"] + Dk[k] + DLT[k] + HALF_WIN / 2)
+                    if m["win"]:
+                        d_c, hw_ = 0.5 * (m["win"][0] + m["win"][1]), 0.5 * (m["win"][1] - m["win"][0])
+                    elif DLT[k] > 2.0 / sf:
+                        d_c, hw_ = m["base"] + Dk[k], DLT[k]
+                    else:
+                        continue
+                    lo_ = np.searchsorted(x, m["p"].min() + d_c - hw_ - HALF_WIN / 2)
+                    hi_ = np.searchsorted(x, m["p"].max() + d_c + hw_ + HALF_WIN / 2)
                     if hi_ - lo_ < 5:
                         continue
                     xs2 = x[lo_:hi_]
@@ -832,8 +961,8 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
                     own2 = a_i * mcol(xs2, m["p"], m["it"], m["d"], fw0 * m["wf"], eta)
                     r2 = yv[lo_:hi_] - fit[lo_:hi_] + own2
                     bb = (np.inf, m["d"], None, 0.0)
-                    for dd in np.arange(-DLT[k], DLT[k] + 1e-12, step):
-                        col = mcol(xs2, m["p"], m["it"], m["base"] + Dk[k] + dd, fw0 * m["wf"], eta)
+                    for dd in np.arange(-hw_, hw_ + 1e-12, step):
+                        col = mcol(xs2, m["p"], m["it"], d_c + dd, fw0 * m["wf"], eta)
                         den = (w2 * col * col).sum()
                         if den <= 0:
                             continue
@@ -841,14 +970,14 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
                         # mild preference for the library position (breaks ties between neighbours)
                         ss = (w2 * (r2 - aa * col) ** 2).sum() * (1.0 + S["SHIFT_PRIOR"] * (dd * sf / 10.0) ** 2)
                         if ss < bb[0]:
-                            bb = (ss, m["base"] + Dk[k] + dd, col, aa)
+                            bb = (ss, d_c + dd, col, aa)
                     if bb[2] is not None:
                         m["d"] = bb[1]
                         fit[lo_:hi_] = fit[lo_:hi_] - own2 + bb[3] * bb[2]
         for m in MP:
             k = m["k"]
-            m["dlo"] = m["base"] + Dk[k] - DLT[k]
-            m["dhi"] = m["base"] + Dk[k] + DLT[k]
+            m["dlo"] = m["base"] + Dk[k] - DLT[k] if not m["win"] else m["win"][0]
+            m["dhi"] = m["base"] + Dk[k] + DLT[k] if not m["win"] else m["win"][1]
             m["d"] = float(np.clip(m["d"], m["dlo"], m["dhi"]))
         return moved
 
@@ -948,7 +1077,7 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
     return dict(tsp=tsp, sigma=sigma, fw0=fw0, eta=eta, g_off=g_off, ppm=ppm, grid=grid, yv=yv, wts=wts,
                 fit=fit, base_fit=base_fit, amp=amp, se=se, MP=MP, comp_fit=comp_fit, unknown=unknown, uamp=ua,
                 unk_fit=U * ua[None, :] if len(unknown) else np.zeros((len(x), 0)),
-                chi2n=chi(fit), sf=sf, mcols=None)
+                chi2n=chi(fit), sf=sf, mcols=None, ph=ph)
 
 
 # =============================================================================
@@ -1450,7 +1579,7 @@ def _fit_one(smp, d, libdir, out):
              signal_explained_by_library=res["comp_fit"].sum() / sig_area,
              signal_in_unassigned_singlets=res["unk_fit"].sum() / sig_area if res["unk_fit"].size else 0.0,
              abs_residual_fraction=np.abs(res["yv"] - res["fit"]).sum() / sig_area,
-             fit_time_s=round(time.time() - t0, 1),
+             fit_time_s=round(time.time() - t0, 1), **res["ph"],
              processing=((S.get("PROCESSING_USED") or {}).get(smp) or {}).get(
                  "description", f"as processed in TopSpin (pdata/{procno})"))
     if S["OVERLAYS"]:
@@ -1524,6 +1653,24 @@ def apply_manual(out, gr):
     return gr
 
 
+def ph_readme():
+    """The paragraph on the pH estimate for the results README."""
+    return (f"pH_est in the QC sheet is an ESTIMATE of the pH in the NMR tube when the spectrum was recorded (not in the "
+            f"culture), from the positions of the histidine imidazole singlets H2 (looked for in "
+            f"{S['PH_HIS_H2_WINDOW'][0]:.2f}-{S['PH_HIS_H2_WINDOW'][1]:.2f} ppm) and H4 "
+            f"({S['PH_HIS_H4_WINDOW'][0]:.2f}-{S['PH_HIS_H4_WINDOW'][1]:.2f} ppm), TSP-referenced. Each peak top is "
+            f"refined with a 3-point parabola and used only if at least {S['PH_MIN_SNR']} x noise. Henderson-Hasselbalch: "
+            f"f = (d_HA - d_obs)/(d_HA - d_A), pH = pKa + log10(f/(1-f)), with approximate literature constants for free "
+            f"histidine in water at 25 C: pKa {S['PH_HIS_PKA']}, H2 d_HA {S['PH_HIS_H2_LIMITS'][0]} / d_A "
+            f"{S['PH_HIS_H2_LIMITS'][1]} ppm, H4 d_HA {S['PH_HIS_H4_LIMITS'][0]} / d_A {S['PH_HIS_H4_LIMITS'][1]} ppm. "
+            f"pH_est is the mean of pH_H2 and pH_H4. pH_flag: ok, one_proton_only, protons_disagree (more than "
+            f"{S['PH_MAX_DISAGREE']} apart) or no_histidine. Changes in pH between samples are reliable; the absolute "
+            f"value is only good to about +/-0.2 pH units, because the constants were not measured in your medium "
+            f"(H2 and H4 can then read a steady amount apart). "
+            + (f"Histidine H2/H4 were fitted within {S['PH_HIS_PLACE_HZ']:g} Hz of the peaks used for the estimate."
+               if S['PH_PLACE_HISTIDINE'] else ""))
+
+
 def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
     """Build every table and figure from the per-sample results (also used by regrade.py and after manual
     adjustments). Manual adjustments saved in _per_sample are applied here."""
@@ -1588,7 +1735,7 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
     readme = pd.DataFrame(dict(item=[
         "Software", "Units", "Reference", "How numbers are produced", "Quantified", "Overlapped (semi-quantitative)",
         DECONV, MANUAL, "Upper bound only", "Not detected", "SE", "Library", "Peak_list_by_metabolite",
-        "Observed_peaks_assigned", "QC", "Manual_edits", "Settings"], text=[
+        "Observed_peaks_assigned", "QC", "pH estimate", "Manual_edits", "Settings"], text=[
         f"MANC-Q {__version__} (https://github.com/willwas1/MANC-Q), results written {time.strftime('%Y-%m-%d %H:%M')}.",
         "mM in the original medium = tube mM x dilution factor (from the dilution file).",
         f"{S['REFERENCE']} internal standard only: {S['TSP_MM_IN_TUBE']} mM in tube, 9 H, area from a pseudo-Voigt fit incl. 29Si satellites. No calibration against any sample or standard.",
@@ -1603,7 +1750,8 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         f"{sum(c['source']=='GISSMO' for c in lib)} GISSMO spin systems (BMRB, QM-simulated at the spectrometer frequency) + {sum(c['source']=='SPIN' for c in lib)} other spin system(s) simulated the same way + {sum(c['source']=='CASMDB' for c in lib)} fixed peak lists (CASMDB) + optional Pluronic F-68 terms. See Library sheet.",
         "Every multiplet of every metabolite in every sample: fitted centre, range, line positions and relative intensities, protons, linewidth, shift from library, dominance, misfit, concentration from that multiplet alone, and whether it was used as a reporter.",
         "Peaks picked in the observed spectrum (>10 x noise) with the fitted contributors at each apex (the peak assignment list).",
-        "Per-sample referencing, linewidth, noise, fit quality, fraction of signal explained, and how the spectrum was processed.",
+        "Per-sample referencing, linewidth, noise, fit quality, fraction of signal explained, how the spectrum was processed, and the estimated pH.",
+        ph_readme() if "pH_est" in Q else "Not estimated: these results were fitted by a MANC-Q version before 1.4.",
         "Every manual adjustment: sample, metabolite, automatic and manual value, shift and linewidth used, note, user and time. Empty if nothing was adjusted.",
         json.dumps({k: v for k, v in S.items() if k != "OVERLAY_REGIONS"})]))
     libdf = pd.DataFrame([dict(metabolite=c["name"], cls=c["cls"], source=c["source"], n_protons=c["nprot"],
@@ -1647,6 +1795,8 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
     log("\nBest tier per metabolite across samples:")
     log(summ.best_tier.value_counts().to_string())
     log(Q.round(3).T.to_string())
+    if "pH_est" in Q:
+        log("\npH estimate: " + ph_readme())
     log(f"\nWrote {xl}")
     return G
 
