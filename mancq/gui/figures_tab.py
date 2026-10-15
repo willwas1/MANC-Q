@@ -9,12 +9,12 @@ import numpy as np
 import pandas as pd
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPixmap, QColor, QBrush
+from PySide6.QtGui import QPixmap, QColor, QBrush, QIcon
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QLineEdit,
                                QComboBox, QDoubleSpinBox, QSpinBox, QCheckBox, QRadioButton, QButtonGroup, QGroupBox,
                                QListWidget, QListWidgetItem, QPlainTextEdit, QScrollArea, QSplitter, QDialog,
                                QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog, QMessageBox, QApplication,
-                               QAbstractItemView, QSizePolicy, QFrame)
+                               QAbstractItemView, QSizePolicy, QFrame, QColorDialog)
 
 from mancq import figures as F
 
@@ -80,6 +80,12 @@ class FiguresTab(QWidget):
         ball = QPushButton("All"); ball.clicked.connect(lambda: self.tick_all(True))
         bnone = QPushButton("None"); bnone.clicked.connect(lambda: self.tick_all(False))
         l1.addWidget(bs, 3, 0); l1.addWidget(ball, 3, 1); l1.addWidget(bnone, 3, 2)
+        bcol = QPushButton("Colour..."); bcol.clicked.connect(self.pick_colour)
+        bcol.setToolTip("Choose the colour of the selected spectrum (or double-click it in the list)")
+        bres = QPushButton("Reset colours"); bres.clicked.connect(self.reset_colours)
+        bres.setToolTip("Back to the template's own colours (black, or colour-blind safe colours for overlays)")
+        l1.addWidget(bcol, 6, 0); l1.addWidget(bres, 6, 1, 1, 2)
+        self.traces.itemDoubleClicked.connect(lambda it: self.pick_colour())
         self.mode_mean = QRadioButton("Mean of replicates"); self.mode_one = QRadioButton("One replicate:")
         self.mode_mean.setToolTip("Average the replicate spectra of each group and time point (the caption says so)")
         self.mode_one.setToolTip("Show one real spectrum per group and time point: the replicate named on the right "
@@ -115,9 +121,18 @@ class FiguresTab(QWidget):
         l2.addWidget(self.baseline, 4, 0, 1, 3)
         self.show_fit = QCheckBox("Draw the fit as well (orange)")
         l2.addWidget(self.show_fit, 5, 0, 1, 3)
-        self.stack_lab = QLabel("Offset between spectra")
+        self.stack_lab = QLabel("Offset upwards")
         self.stack_off = QSpinBox(); self.stack_off.setRange(0, 200); self.stack_off.setSuffix(" % of height")
+        self.stack_off.setToolTip("How far each spectrum is raised above the one before, as a share of the plot "
+                                  "height (0 = on top of each other)")
         l2.addWidget(self.stack_lab, 6, 0); l2.addWidget(self.stack_off, 6, 1, 1, 2)
+        self.side_lab = QLabel("Offset sideways")
+        self.side_off = QDoubleSpinBox(); self.side_off.setRange(0, 2); self.side_off.setDecimals(3)
+        self.side_off.setSingleStep(0.01); self.side_off.setSuffix(" ppm")
+        self.side_off.setToolTip("How far each spectrum is moved to the right of the one before (a staggered, "
+                                 "angled stack). The ppm scale then applies to the first spectrum, and the caption "
+                                 "says so.")
+        l2.addWidget(self.side_lab, 11, 0); l2.addWidget(self.side_off, 11, 1, 1, 2)
         self.inset_lab = QLabel("Inset (ppm)")
         self.inset = QLineEdit(); self.inset.setToolTip("The region drawn enlarged in the inset, e.g. 0.8-1.1. Leave "
                                                         "empty for no inset.")
@@ -176,8 +191,8 @@ class FiguresTab(QWidget):
             w.currentIndexChanged.connect(self.changed)
         for w in (self.region, self.leave, self.inset, self.fit_region):
             w.editingFinished.connect(self.changed)
-        for w in (self.mag_from, self.mag_factor, self.clip_pct, self.stack_off, self.width, self.height, self.font,
-                  self.line):
+        for w in (self.mag_from, self.mag_factor, self.clip_pct, self.stack_off, self.side_off, self.width,
+                  self.height, self.font, self.line):
             w.valueChanged.connect(self.changed)
         for w in [self.magnify, self.clip, self.baseline, self.show_fit, self.mode_mean] + [b for b, _ in self.tier_boxes]:
             w.toggled.connect(self.changed)
@@ -303,7 +318,9 @@ class FiguresTab(QWidget):
         self.mag_factor.setValue(int(s["magnify_factor"]))
         self.clip.setChecked(bool(s["clip"])); self.clip_pct.setValue(int(s["clip_percent"]))
         self.baseline.setChecked(bool(s.get("baseline_correct", True))); self.show_fit.setChecked(bool(s.get("show_fit")))
-        self.stack_off.setValue(int(s["stack_offset"]))
+        self._tmpl = s["template"]
+        self.stack_off.setValue(int(s.get("overlay_offset", 0) if s["template"] == "overlay" else s["stack_offset"]))
+        self.side_off.setValue(float(s.get("offset_x_ppm") or 0.0))
         self.style.setCurrentIndex(max(0, self.style.findData(s["label_style"])))
         self.which.setCurrentIndex(max(0, self.which.findData(s.get("label_which", "main"))))
         for cb, t in self.tier_boxes:
@@ -317,6 +334,11 @@ class FiguresTab(QWidget):
 
     def from_controls(self):
         s = self.spec
+        prev = getattr(self, "_tmpl", s["template"])           # the offset box belongs to the template shown
+        key = {"stack": "stack_offset", "overlay": "overlay_offset"}.get(prev)
+        if key:
+            s[key] = self.stack_off.value()
+        s["offset_x_ppm"] = self.side_off.value()
         s["template"] = self.template.currentData()
         s["traces"] = [self.traces.item(i).data(Qt.UserRole) for i in range(self.traces.count())
                        if self.traces.item(i).checkState() == Qt.Checked]
@@ -328,7 +350,6 @@ class FiguresTab(QWidget):
             self.mag_factor.value()
         s["clip"], s["clip_percent"] = self.clip.isChecked(), self.clip_pct.value()
         s["baseline_correct"], s["show_fit"] = self.baseline.isChecked(), self.show_fit.isChecked()
-        s["stack_offset"] = self.stack_off.value()
         s["label_style"], s["label_which"] = self.style.currentData(), self.which.currentData()
         s["label_tiers"] = [t for cb, t in self.tier_boxes if cb.isChecked()]
         s["fit_metabolites"] = [self.fit_mets.item(i).text() for i in range(self.fit_mets.count())
@@ -353,8 +374,14 @@ class FiguresTab(QWidget):
         if self.spec.get("labels") is None or (old != new and not self.spec.get("labels_edited")):
             self.make_labels()
         t = self.spec["template"]
-        for w in (self.stack_lab, self.stack_off):
-            w.setVisible(t == "stack")
+        if t != getattr(self, "_tmpl", t):
+            self.loading = True
+            self.stack_off.setValue(int(self.spec.get("overlay_offset", 0) if t == "overlay"
+                                        else self.spec.get("stack_offset", 25)))
+            self.loading = False
+        self._tmpl = t
+        for w in (self.stack_lab, self.stack_off, self.side_lab, self.side_off):
+            w.setVisible(t in ("stack", "overlay"))
         for w in (self.inset_lab, self.inset):
             w.setVisible(t == "overlay")
         for w in (self.fit_lab, self.fit_mets, self.fit_reg_lab, self.fit_region):
@@ -416,6 +443,7 @@ class FiguresTab(QWidget):
             warns = " ".join(info.get("warnings") or [])
             self.check.setText(("" if ok else "\u26a0 ") + txt + (f" {warns}" if warns else ""))
             self.check.setStyleSheet("color:#166534;" if ok and not warns else "color:#b45309;")
+            self.show_colours(traces)
             n = sum(1 for r in self.spec.get("labels") or [] if r.get("show"))
             self.n_labels.setText(f"{n} label(s){' (edited)' if self.spec.get('labels_edited') else ''}")
             if self.cap_auto.isChecked():
@@ -440,6 +468,43 @@ class FiguresTab(QWidget):
             json.dump(self.spec, open(self.settings_file(), "w"), indent=1, default=str)
         except OSError:
             pass
+
+    def colour_of(self, key, k):
+        """The colour a spectrum is drawn in: the one chosen, else the template's own (k = its place among the
+        ticked spectra)."""
+        own = F.COLOURS[k % len(F.COLOURS)] if self.spec["template"] == "overlay" else "#000000"
+        return (self.spec.get("colours") or {}).get(key) or own
+
+    def show_colours(self, traces):
+        """A small swatch of each spectrum's colour in the list."""
+        order = [tr.get("key") for tr in traces]
+        self.traces.blockSignals(True)
+        for i in range(self.traces.count()):
+            it = self.traces.item(i)
+            key = it.data(Qt.UserRole)
+            if key in order or key in (self.spec.get("colours") or {}):
+                pm = QPixmap(14, 14); pm.fill(QColor(self.colour_of(key, order.index(key) if key in order else 0)))
+                it.setIcon(QIcon(pm))
+            else:
+                it.setIcon(QIcon())
+        self.traces.blockSignals(False)
+
+    def pick_colour(self):
+        it = self.traces.currentItem()
+        if it is None or self.R is None:
+            _A().warn(self, "Click a spectrum in the list first, then Colour..."); return
+        key = it.data(Qt.UserRole)
+        ticked = [self.traces.item(i).data(Qt.UserRole) for i in range(self.traces.count())
+                  if self.traces.item(i).checkState() == Qt.Checked]
+        start = QColor(self.colour_of(key, ticked.index(key) if key in ticked else 0))
+        c = QColorDialog.getColor(start, self, f"Colour of {it.text().split('   ')[0]}")
+        if c.isValid():
+            self.spec.setdefault("colours", {})[key] = c.name()
+            self.changed()
+
+    def reset_colours(self):
+        self.spec["colours"] = {}
+        self.changed()
 
     def tick_all(self, on):
         self.traces.blockSignals(True)

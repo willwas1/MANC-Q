@@ -106,6 +106,21 @@ def test_templates_and_export():
             assert info["caption"] and "TSP" in info["caption"] and "\u2014" not in info["caption"]
             f, lw = F.preflight(fig)
             assert f >= F.MIN_FONT_PT and lw >= F.MIN_LINE_PT
+        # colours chosen per spectrum, and offsets upwards and sideways
+        import matplotlib.colors as mc
+        keys = list(groups)
+        spec = F.default_spec(R)
+        spec.update(template="overlay", traces=keys, colours={keys[0]: "#d62728", keys[1]: "#0072b2"},
+                    overlay_offset=10, offset_x_ppm=0.05, inset_region="")
+        trs = F.collect_traces(R, spec, sheet)
+        fig, info = F.render(spec, R, trs)
+        lines = [l for ax in fig.axes for l in ax.get_lines() if len(l.get_xdata()) > 100]
+        cols = {mc.to_hex(l.get_color()) for l in lines}
+        assert cols == {"#d62728", "#0072b2"}
+        red = [l for l in lines if mc.to_hex(l.get_color()) == "#d62728"]
+        blue = [l for l in lines if mc.to_hex(l.get_color()) == "#0072b2"]
+        assert np.allclose(np.nanmin(red[0].get_xdata()) - np.nanmin(blue[0].get_xdata()), 0.05, atol=1e-6)
+        assert "(red)" in info["caption"] and "(blue)" in info["caption"] and "0.05 ppm sideways" in info["caption"]
         spec = F.default_spec(R)
         spec.update(template="representative", traces=list(groups)[:1], labels=labels, width_mm=85, height_mm=50)
         files = F.export(spec, d, os.path.join(d, "figs", "rep"), ["pdf", "svg", "tiff"],

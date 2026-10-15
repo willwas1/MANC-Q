@@ -2,6 +2,19 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 1.5.1 (15 October 2026)
+
+Figures step: colours and offsets.
+
+* **A colour for each spectrum.** Click a spectrum in the list and **Colour...** (or double-click it); a
+  small square shows each spectrum's colour, and the caption names the colours. **Reset colours** goes
+  back to the template's own (black; colour-blind safe colours in overlays). Works in every template (in
+  fit evidence it colours the measured spectrum).
+* **Offsets.** Time course and overlay have **Offset upwards** (a share of the plot height; the overlay
+  now has it too, default 0) and **Offset sideways** (ppm per spectrum, for a staggered, angled stack;
+  peak labels and cut-off marks move with the spectrum). The caption gives both offsets and, with a
+  sideways offset, says the ppm scale belongs to the first spectrum.
+
 ## 1.5.0 (15 October 2026)
 
 A new step for publication figures, and the Results table now says where each value is measured. The fitting

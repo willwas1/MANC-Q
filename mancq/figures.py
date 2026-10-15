@@ -429,7 +429,7 @@ def default_spec(R=None):
                 leave_out=", ".join(f"{a:g}-{b:g}" for a, b in excl), magnify=True, magnify_from=5.5, magnify_factor=8,
                 clip=False, clip_percent=30, label_style="numbers", label_tiers=["Quantified"], label_which="main",
                 labels=None, fit_metabolites=[], fit_region="", stack_offset=25, inset_region="0.8-1.1",
-                baseline_correct=True,
+                baseline_correct=True, overlay_offset=0, offset_x_ppm=0.0, colours={},
                 show_fit=False, width_mm=180.0, height_mm=90.0, font_pt=7.0, line_pt=0.6, title="")
 
 
@@ -498,6 +498,30 @@ def _light(colour, f=0.65):
     import matplotlib.colors as mc
     r, g, b = mc.to_rgb(colour)
     return (r + (1 - r) * f, g + (1 - g) * f, b + (1 - b) * f)
+
+
+COLOUR_NAMES = {"black": "#000000", "grey": "#808080", "blue": "#0072B2", "light blue": "#56B4E9",
+                "green": "#009E73", "red": "#D62728", "orange": "#E69F00", "dark orange": "#D55E00",
+                "purple": "#7B3294", "pink": "#CC79A7", "yellow": "#F0E442", "brown": "#8C564B"}
+
+
+def trace_colour(spec, tr, k, default):
+    """The colour chosen for a spectrum in the window (spec["colours"], by its key), else the template's own."""
+    return (spec.get("colours") or {}).get(tr.get("key", ""), default) or default
+
+
+def colour_name(colour):
+    """The nearest plain colour name, for the caption."""
+    import matplotlib.colors as mc
+    r, g, b = mc.to_rgb(colour)
+    return min(COLOUR_NAMES, key=lambda n: sum((x - y) ** 2 for x, y in zip((r, g, b), mc.to_rgb(COLOUR_NAMES[n]))))
+
+
+def _shift_labels(labels, dx):
+    """Labels moved sideways with an offset spectrum (dx ppm)."""
+    if not dx:
+        return labels
+    return [dict(r, ppm=r["ppm"] - dx, lo=r.get("lo", r["ppm"]) - dx, hi=r.get("hi", r["ppm"]) - dx) for r in labels]
 
 
 def _axes_row(fig, segs, rect):
@@ -701,7 +725,7 @@ def _draw_representative(fig, spec, R, traces, info):
     pairs = list(zip(axes, segs))
     gx, gy = _cut(x, tr["observed"], leave_out=leave)
     for ax, (lo, hi, fac) in pairs:
-        ax.plot(gx, gy * fac, color="k", lw=spec["line_pt"])
+        ax.plot(gx, gy * fac, color=trace_colour(spec, tr, 0, "k"), lw=spec["line_pt"])
         if spec.get("show_fit"):
             gfx, gf = _cut(x, tr["simulated_total"], leave_out=leave)
             ax.plot(gfx, gf * fac, color=COLOURS[1], lw=spec["line_pt"] * 0.8)
@@ -738,6 +762,7 @@ def _draw_stack(fig, spec, R, traces, info):
         return
     top1 = _top_of(traces, segs, spec["clip"], spec["clip_percent"])
     off = top1 * spec["stack_offset"] / 100.0
+    dx = float(spec.get("offset_x_ppm") or 0.0)          # sideways offset per spectrum (to the right)
     n = len(traces)
     top = top1 + off * (n - 1)
     lab_room = 0.18 if spec["label_style"] != "off" else 0.04
@@ -745,14 +770,15 @@ def _draw_stack(fig, spec, R, traces, info):
     pairs = list(zip(axes, segs))
     for k, tr in enumerate(traces):
         gx, gy = _cut(tr["ppm"], tr["observed"], leave_out=leave)
+        col = trace_colour(spec, tr, k, "k")
         for ax, (lo, hi, fac) in pairs:
             yy = np.minimum(gy * fac, top1) if spec["clip"] else gy * fac
-            ax.plot(gx, yy + k * off, color="k" if n <= 2 else "k", lw=spec["line_pt"])
+            ax.plot(gx - k * dx, yy + k * off, color=col, lw=spec["line_pt"])
         last_ax, (lo, hi, fac) = pairs[-1]
         w = (tr["ppm"] >= lo) & (tr["ppm"] <= hi)
         ybase = float(np.nanmedian(tr["observed"][w])) * fac + k * off if w.any() else k * off
         last_ax.text(1.02, ybase, tr["label"], transform=last_ax.get_yaxis_transform(), ha="left", va="bottom",
-                     fontsize=spec["font_pt"], clip_on=False)
+                     fontsize=spec["font_pt"], clip_on=False, color=col)
         info["plotted"].setdefault("ppm", tr["ppm"])
         info["plotted"][f"{tr['label']} (observed)"] = np.interp(info["plotted"]["ppm"], tr["ppm"], tr["observed"])
     for ax, (lo, hi, fac) in pairs:
@@ -771,22 +797,23 @@ def _draw_stack(fig, spec, R, traces, info):
                     pk, _ = find_peaks(np.nan_to_num(yy, nan=-1), height=top1,
                                        distance=max(1, int(0.03 / max(np.median(np.diff(tr["ppm"])), 1e-9))))
                     for p in pk:
-                        ax.text(tr["ppm"][w][p], top1 + k * off, "~", ha="center", va="bottom",
+                        ax.text(tr["ppm"][w][p] - k * dx, top1 + k * off, "~", ha="center", va="bottom",
                                 fontsize=spec["font_pt"], clip_on=False)
     fig.text(0.44, 0.03, "\u03b4 \u00b9H (ppm)", ha="center", va="bottom", fontsize=spec["font_pt"])
     labels = spec.get("labels") or []
     numbers = label_numbers(labels)
     info["numbers"] = numbers
     tr = traces[-1]
-    x = tr["ppm"]
+    sh = (n - 1) * dx                                   # labels go on the top spectrum, wherever it was moved
+    x = tr["ppm"] - sh
 
     def ytop(a, b, i):
         lo, hi, fac = segs[i]
         w = (x >= a - 0.003) & (x <= b + 0.003)
         v = float(np.nanmax(tr["observed"][w]) * fac) if w.any() else 0.0
         return (min(v, top1) if spec["clip"] else v) + (n - 1) * off
-    _place_labels(fig, pairs, labels, spec, numbers, top, ytop, info)
-    info["offset"] = spec["stack_offset"]
+    _place_labels(fig, pairs, _shift_labels(labels, sh), spec, numbers, top, ytop, info)
+    info["offset"] = (spec["stack_offset"], dx)
 
 
 def _draw_overlay(fig, spec, R, traces, info):
@@ -795,20 +822,25 @@ def _draw_overlay(fig, spec, R, traces, info):
     if not segs:
         info["warnings"].append("Nothing to draw: check the ppm region.")
         return
-    top = _top_of(traces, segs, spec["clip"], spec["clip_percent"])
+    top1 = _top_of(traces, segs, spec["clip"], spec["clip_percent"])
+    voff = top1 * float(spec.get("overlay_offset") or 0.0) / 100.0
+    dx = float(spec.get("offset_x_ppm") or 0.0)
+    top = top1 + voff * (len(traces) - 1)
     axes = _axes_row(fig, segs, [0.03, 0.15, 0.94, 0.80])
     pairs = list(zip(axes, segs))
     for k, tr in enumerate(traces):
         gx, gy = _cut(tr["ppm"], tr["observed"], leave_out=leave)
         for ax, _ in pairs:
-            ax.plot(gx, gy, color=COLOURS[k % len(COLOURS)], lw=spec["line_pt"], label=tr["label"])
+            ax.plot(gx - k * dx, gy + k * voff, color=trace_colour(spec, tr, k, COLOURS[k % len(COLOURS)]),
+                    lw=spec["line_pt"], label=tr["label"])
         info["plotted"].setdefault("ppm", tr["ppm"])
         info["plotted"][f"{tr['label']} (observed)"] = np.interp(info["plotted"]["ppm"], tr["ppm"], tr["observed"])
     for ax, (lo, hi, fac) in pairs:
-        ax.set_ylim(-0.02 * top, top * 1.05)
+        ax.set_ylim(-0.02 * top1, top + 0.05 * top1)
         _ticks(ax, lo, hi, spec["font_pt"])
     if spec["clip"]:
         info["clipped"] = True
+    info["offset"] = (float(spec.get("overlay_offset") or 0.0), dx)
     axes[0].legend(loc="upper left", frameon=False, fontsize=spec["font_pt"], handlelength=1.5)
     fig.text(0.5, 0.03, "\u03b4 \u00b9H (ppm)", ha="center", va="bottom", fontsize=spec["font_pt"])
     ins = parse_ranges(spec["inset_region"])
@@ -819,7 +851,8 @@ def _draw_overlay(fig, spec, R, traces, info):
                 if ((tr["ppm"] >= a) & (tr["ppm"] <= b)).any()]
         if tops and host is not None:
             itop = max(max(tops), 1e-12)
-            fac = top / itop
+            fac = top1 / itop
+            ivoff = itop * float(spec.get("overlay_offset") or 0.0) / 100.0
             # the place (in any piece of the axis) where the inset hides the least signal
             best = None
             for ax_, (lo_, hi_, _f) in pairs:
@@ -833,8 +866,9 @@ def _draw_overlay(fig, spec, R, traces, info):
             ia = best[1].inset_axes([best[2], 0.42, 0.42, 0.52])
             for k, tr in enumerate(traces):
                 w = (tr["ppm"] >= a) & (tr["ppm"] <= b)
-                ia.plot(tr["ppm"][w], tr["observed"][w], color=COLOURS[k % len(COLOURS)], lw=spec["line_pt"])
-            ia.set_xlim(b, a); ia.set_ylim(-0.03 * itop, itop * 1.08)
+                ia.plot(tr["ppm"][w] - k * dx, tr["observed"][w] + k * ivoff,
+                        color=trace_colour(spec, tr, k, COLOURS[k % len(COLOURS)]), lw=spec["line_pt"])
+            ia.set_xlim(b, a); ia.set_ylim(-0.03 * itop, itop * 1.08 + ivoff * (len(traces) - 1))
             ia.set_yticks([])
             for sp in ("top", "right", "left"):
                 ia.spines[sp].set_visible(False)
@@ -843,7 +877,7 @@ def _draw_overlay(fig, spec, R, traces, info):
             ia.text(0.02, 0.98, f"\u00d7{fac:.0f}" if fac >= 1.5 else "", transform=ia.transAxes, ha="left", va="top",
                     fontsize=spec["font_pt"])
             from matplotlib.patches import Rectangle
-            host.add_patch(Rectangle((a, -0.01 * top), b - a, itop * 1.1, fill=False, ls="--", lw=spec["line_pt"] * 0.8,
+            host.add_patch(Rectangle((a, -0.01 * top1), b - a, itop * 1.1 + voff * (len(traces) - 1), fill=False, ls="--", lw=spec["line_pt"] * 0.8,
                                      edgecolor="#555555"))
             info["inset"] = (a, b, fac)
 
@@ -882,7 +916,7 @@ def _draw_fit(fig, spec, R, tr, info):
     for ax, (lo, hi, fac) in pairs:
         o = offsets[0]
         gx, go, gf = _cut(x, obs, fit, leave_out=leave)
-        ax.plot(gx, go + o, color="k", lw=lw)
+        ax.plot(gx, go + o, color=trace_colour(spec, tr, 0, "k"), lw=lw)
         ax.plot(gx, gf + o, color="#D55E00", lw=lw * 0.9)
         for k, m in enumerate(mets):
             o = offsets[k + 1]
@@ -939,13 +973,25 @@ def caption(spec, R, traces, info):
     if t == "representative":
         parts.append(f"Representative {fld}1H NMR spectrum of {_trace_desc(traces[0])}{pp_txt}.")
     elif t == "stack":
-        parts.append(f"{fld}1H NMR spectra{pp_txt} of " + "; ".join(_trace_desc(tr) for tr in traces) +
-                     f", offset vertically by {spec['stack_offset']:g} % of the plot height, bottom to top in the "
-                     f"order listed.")
+        cols = [trace_colour(spec, tr, k, "k") for k, tr in enumerate(traces)]
+        named = len({c.lower() for c in cols}) > 1 or cols[0].lower() not in ("k", "#000000", "black")
+        dx = float(spec.get("offset_x_ppm") or 0.0)
+        parts.append(f"{fld}1H NMR spectra{pp_txt} of " +
+                     "; ".join(_trace_desc(tr) + (f" ({colour_name(c)})" if named else "") for tr, c in zip(traces, cols)) +
+                     f", offset vertically by {spec['stack_offset']:g} % of the plot height" +
+                     (f" and sideways by {dx:g} ppm per spectrum" if dx else "") +
+                     ", bottom to top in the order listed." +
+                     (" The ppm scale applies to the bottom spectrum." if dx else ""))
     elif t == "overlay":
-        names = "; ".join(f"{_trace_desc(tr)} ({['blue', 'orange', 'green', 'pink', 'yellow', 'sky blue', 'black', 'yellow'][k % 8]})"
+        names = "; ".join(f"{_trace_desc(tr)} ({colour_name(trace_colour(spec, tr, k, COLOURS[k % len(COLOURS)]))})"
                           for k, tr in enumerate(traces))
-        parts.append(f"Overlaid {fld}1H NMR spectra{pp_txt} of {names}.")
+        parts.append(f"{'Overlaid ' if len(traces) > 1 else ''}{fld}1H NMR spectra{pp_txt} of {names}.")
+        vo, dx = float(spec.get("overlay_offset") or 0.0), float(spec.get("offset_x_ppm") or 0.0)
+        if len(traces) > 1 and (vo or dx):
+            parts.append("Each spectrum is offset from the one before by " +
+                         " and ".join(x for x in (f"{vo:g} % of the plot height upwards" if vo else "",
+                                                  f"{dx:g} ppm sideways" if dx else "") if x) +
+                         (" (the ppm scale applies to the first spectrum)." if dx else "."))
     else:
         tr = traces[0]
         names = info.get("fit_names", [])
@@ -1109,6 +1155,7 @@ def collect_traces(R, spec, sheet):
         if key in groups:
             tr = build_trace(R, groups[key], spec.get("mode", "mean"), spec.get("replicate"), comps)
             if tr is not None:
+                tr["key"] = key
                 out.append(tr)
     return out
 

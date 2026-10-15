@@ -195,10 +195,17 @@ to complete in Excel. The groups are saved in the results folder (`sample_sheet.
 Replicates of one group at one time become one line: either the **Mean of replicates**, or **One replicate**
 (choose which; the caption names it).
 
+**Colours:** click a spectrum in the list and **Colour...** (or double-click it) to choose its colour; the
+small square next to each spectrum shows its colour, and the caption names it (red, blue...). **Reset
+colours** goes back to black (or to colour-blind safe colours in an overlay).
+
 **2 Region.** The ppm range shown (several pieces are allowed, for example `0.8-1.6, 3.0-4.2`), the regions to
 **Leave out** (drawn as breaks in the axis; the water region is filled in from your run), **Magnify** the
 region above a ppm (marked x8 or similar), and **Cut tall peaks** above a share of the tallest one (each cut
-peak is marked ~). Fit evidence has its own list of metabolites and its own ppm range (empty = around the main
+peak is marked ~). For the time course and the overlay, **Offset upwards** raises each spectrum above the
+one before (a share of the plot height; 0 = on top of each other) and **Offset sideways** moves each one to
+the right by a number of ppm, for a staggered, angled stack. With a sideways offset the ppm scale belongs to
+the first (bottom) spectrum, and the caption says so. Fit evidence has its own list of metabolites and its own ppm range (empty = around the main
 peaks of the metabolites you ticked).
 
 **3 Labels.** Labels come from MANC-Q's own fit: the metabolites graded as you tick (Quantified by default),
