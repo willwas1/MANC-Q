@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, Q
                                QAbstractItemView, QSizePolicy, QFrame, QColorDialog)
 
 from mancq import figures as F
+from mancq.gui import theme
 
 LABEL_TIERS = [("Quantified", "Quantified"), ("Overlapped", "Overlapped (semi-quantitative)"),
                ("Estimate", "Deconvolution estimate (low confidence)"), ("Manual", "Manually adjusted")]
@@ -27,6 +28,18 @@ STYLES = [("Numbers (key in the caption)", "numbers"), ("Abbreviations", "abbrev
 def _A():
     from mancq.gui import app
     return app
+
+
+def swatch(colour, size=14):
+    """A small colour square with a thin border, so black stays visible on a dark window and white on a light one."""
+    from PySide6.QtGui import QPainter
+    pm = QPixmap(size, size)
+    pm.fill(QColor(colour))
+    p = QPainter(pm)
+    p.setPen(QColor(theme.T("edge")))
+    p.drawRect(0, 0, size - 1, size - 1)
+    p.end()
+    return pm
 
 
 class FiguresTab(QWidget):
@@ -47,7 +60,7 @@ class FiguresTab(QWidget):
         bar = QHBoxLayout()
         bo = QPushButton("Open a results folder..."); bo.clicked.connect(self.choose); bar.addWidget(bo)
         self.where = QLabel("Open a results folder (or finish a run) to make figures from it.")
-        self.where.setStyleSheet("color:#4b5563;"); bar.addWidget(self.where, 1)
+        theme.role(self.where, "muted"); bar.addWidget(self.where, 1)
         v.addLayout(bar)
         split = QSplitter(Qt.Horizontal)
         split.addWidget(self.controls())
@@ -211,7 +224,7 @@ class FiguresTab(QWidget):
     def preview_panel(self):
         right = QWidget(); v = QVBoxLayout(right); v.setContentsMargins(0, 0, 0, 0)
         self.preview = QLabel(); self.preview.setAlignment(Qt.AlignCenter)
-        self.preview.setStyleSheet("background:#e5e7eb;")
+        theme.role(self.preview, "frame")             # the white page sits on a soft frame, in either mode
         self.preview.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.preview.setMinimumHeight(260)
         v.addWidget(self.preview, 3)
@@ -392,8 +405,7 @@ class FiguresTab(QWidget):
             w.setVisible(t == "fit")
         self.show_fit.setVisible(t == "representative")
         self.fit_col.setVisible(t in ("representative", "fit"))
-        pm = QPixmap(12, 12); pm.fill(QColor(self.spec.get("fit_colour") or F.FIT_COLOUR))
-        self.fit_col.setIcon(QIcon(pm))
+        self.fit_col.setIcon(QIcon(swatch(self.spec.get("fit_colour") or F.FIT_COLOUR, 12)))
         for w in (self.magnify, self.mag_from, self.mag_factor):
             w.setEnabled(t in ("representative", "stack"))
         self.width.setEnabled(self.width_pre.currentData() is None)
@@ -449,7 +461,7 @@ class FiguresTab(QWidget):
             txt, ok = F.preflight_text(fig, spec)
             warns = " ".join(info.get("warnings") or [])
             self.check.setText(("" if ok else "\u26a0 ") + txt + (f" {warns}" if warns else ""))
-            self.check.setStyleSheet("color:#166534;" if ok and not warns else "color:#b45309;")
+            theme.role(self.check, "ok" if ok and not warns else "warn")
             self.show_colours(traces)
             n = sum(1 for r in self.spec.get("labels") or [] if r.get("show"))
             self.n_labels.setText(f"{n} label(s){' (edited)' if self.spec.get('labels_edited') else ''}")
@@ -490,8 +502,7 @@ class FiguresTab(QWidget):
             it = self.traces.item(i)
             key = it.data(Qt.UserRole)
             if key in order or key in (self.spec.get("colours") or {}):
-                pm = QPixmap(14, 14); pm.fill(QColor(self.colour_of(key, order.index(key) if key in order else 0)))
-                it.setIcon(QIcon(pm))
+                it.setIcon(QIcon(swatch(self.colour_of(key, order.index(key) if key in order else 0))))
             else:
                 it.setIcon(QIcon())
         self.traces.blockSignals(False)
@@ -589,7 +600,7 @@ class SheetDialog(QDialog):
             "as <i>sample</i> (or EXPNO), <i>group</i> (or condition, reactor), <i>time_h</i> (12, 12 h, 2 d and "
             "day 3 all work), <i>replicate</i> and <i>label</i>. Extra columns (feed, VCD, viability, ...) are kept. "
             "Small mistakes are reported, not refused."))
-        self.msg = QLabel(""); self.msg.setWordWrap(True); self.msg.setStyleSheet("color:#b45309;")
+        self.msg = QLabel(""); self.msg.setWordWrap(True); theme.role(self.msg, "warn")
         v.addWidget(self.msg)
         h = QHBoxLayout()
         bl = QPushButton("Load sample sheet (CSV or Excel)..."); bl.clicked.connect(self.load)
@@ -623,7 +634,8 @@ class SheetDialog(QDialog):
                 it = QTableWidgetItem(txt)
                 if c in ("sample", "nmr_title"):
                     it.setFlags(it.flags() & ~Qt.ItemIsEditable)
-                    it.setBackground(QBrush(QColor("#f3f4f6")))
+                    it.setBackground(QBrush(QColor(theme.T("surface"))))
+                    it.setForeground(QBrush(QColor(theme.T("muted"))))
                 self.table.setItem(i, j, it)
         self.table.resizeColumnsToContents()
 
@@ -657,14 +669,14 @@ class SheetDialog(QDialog):
                     if str(val).strip() not in ("", "nan"):
                         cur.at[s, c] = val
         self.show_sheet(cur.reset_index())
-        self.msg.setStyleSheet("color:#166534;" if not warns else "color:#b45309;")
+        theme.role(self.msg, "ok" if not warns else "warn")
         self.msg.setText(f"Read {os.path.basename(f)}: {n} sample(s) matched. " + " ".join(warns))
 
     def save_template(self):
         f, _ = QFileDialog.getSaveFileName(self, "Save a sample sheet to fill in", "sample_sheet.csv", "CSV (*.csv)")
         if f:
             self.result_sheet().to_csv(f, index=False)
-            self.msg.setStyleSheet("color:#166534;")
+            theme.role(self.msg, "ok")
             self.msg.setText(f"Saved {f}. Fill in group, time_h and replicate (in Excel, keep it as CSV), then load it.")
 
     def clear(self):
@@ -821,6 +833,6 @@ class ExportDialog(QDialog):
             QApplication.restoreOverrideCursor()
             _A().error_box(self, f"Export failed: {exc}", traceback.format_exc()); return
         QApplication.restoreOverrideCursor()
-        self.msg.setStyleSheet("color:#166534;")
+        theme.role(self.msg, "ok")
         self.msg.setText("Saved:\n" + "\n".join(os.path.basename(f) for f in files) + f"\nin {os.path.dirname(base)}")
         self.openb.setEnabled(True)

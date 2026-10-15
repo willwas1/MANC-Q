@@ -9,6 +9,9 @@ Every step has a **Help** button (top right) that shows its part of this guide. 
 dataset folder, reference concentration, dilution, regions and other settings for next time; check them before
 each run. (They are kept in `window_settings.json` in your AppData\MANC-Q folder; delete it to start afresh.)
 
+MANC-Q follows the Windows light or dark setting (Settings > Personalisation > Colours), and switches
+while it is open. The spectra plots stay white in both, like paper.
+
 ## 1 Spectra
 
 ![Spectra](images/1_spectra.png)

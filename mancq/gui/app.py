@@ -33,6 +33,7 @@ from mancq import engine as q
 from mancq import fidproc as fp
 from mancq import results as rs
 from mancq import twod
+from mancq.gui import theme
 
 
 ACCENT = "#660099"
@@ -52,6 +53,24 @@ CACHE = os.path.join(os.path.expanduser("~"), ".mancq_cache")
 PREFS_FILE = os.environ.get("MANCQ_PREFS") or os.path.join(
     os.environ.get("APPDATA") or os.path.expanduser("~"), "MANC-Q", "window_settings.json")
 HELP_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "help")
+
+
+def tc(colour):
+    """A status colour written as a fixed hex value (green, amber, red, grey, purple) -> the matching colour of the
+    current theme, so text stays readable in light and dark mode."""
+    tok = {"#15803d": "ok", "#166534": "ok", "#b45309": "warn", "#b91c1c": "bad", "#4b5563": "muted",
+           "#6b7280": "muted", "#111827": "text", ACCENT: "accent_fg"}.get(str(colour).lower())
+    return theme.T(tok) if tok else colour
+
+
+def _tier_colours():
+    """Cells with no value (not detected, not measurable) take the table's own background in either mode."""
+    TIER_COL["Not detected"], TIER_TXT["Not detected"] = theme.T("bg"), theme.T("muted")
+    TIER_COL["Not measurable (region ignored)"] = theme.T("surface")
+    TIER_TXT["Not measurable (region ignored)"] = theme.T("muted")
+
+
+theme.on_change(_tier_colours)
 
 
 # ============================================================================ helpers
@@ -174,14 +193,13 @@ def heading(text, sub=None):
     top.addWidget(hb)
     v.addLayout(top)
     if sub:
-        s = QLabel(sub); s.setStyleSheet("color: #4b5563;"); s.setWordWrap(True); v.addWidget(s)
+        s = QLabel(sub); theme.role(s, "muted"); s.setWordWrap(True); v.addWidget(s)
     return box
 
 
 def primary(text):
     b = QPushButton(text)
-    b.setStyleSheet(f"QPushButton {{ background:{ACCENT}; color:white; padding:6px 18px; font-weight:600; }}"
-                    "QPushButton:disabled { background:#c4b5d4; }")
+    b.setObjectName("primary")
     return b
 
 
@@ -373,7 +391,7 @@ class SpectraTab(QWidget):
         right = QWidget(); rv = QVBoxLayout(right); rv.setContentsMargins(0, 0, 0, 0)
         ch = QHBoxLayout()
         hint = QLabel("Select several rows (Ctrl or Shift + click) to compare them. Scroll over the plot to zoom.")
-        hint.setStyleSheet("color:#4b5563;"); hint.setWordWrap(True); ch.addWidget(hint, 1)
+        theme.role(hint, "muted"); hint.setWordWrap(True); ch.addWidget(hint, 1)
         self.scale = QCheckBox("Scale to the reference peak"); self.scale.setChecked(True)
         self.scale.setToolTip("Divide each spectrum by the height of its TSP/DSS peak, so spectra with different "
                               "numbers of scans or receiver gain can be compared")
@@ -455,7 +473,7 @@ class SpectraTab(QWidget):
                 it = QTableWidgetItem(val)
                 it.setToolTip(val)
                 if j == 4 and val == "FID only":
-                    it.setForeground(QBrush(QColor("#b45309")))
+                    it.setForeground(QBrush(QColor(tc("#b45309"))))
                 self.table.setItem(i, j, it)
         self.table.blockSignals(False)
 
@@ -467,7 +485,7 @@ class SpectraTab(QWidget):
         self.table.blockSignals(True)
         self.table.setItem(i, 5, QTableWidgetItem("" if not np.isfinite(snr) else f"{snr:,.0f}"))
         it = QTableWidgetItem(check)
-        it.setForeground(QBrush(QColor("#15803d" if check == "OK" else "#b45309")))
+        it.setForeground(QBrush(QColor(tc("#15803d" if check == "OK" else "#b45309"))))
         self.table.setItem(i, 6, it)
         self.table.blockSignals(False)
 
@@ -581,7 +599,7 @@ class ProcessTab(QWidget):
         self.asis = QCheckBox("Use TopSpin's processing as is")
         self.asis.toggled.connect(self.asis_toggled)
         lv.addWidget(self.asis)
-        self.asis_note = QLabel(); self.asis_note.setWordWrap(True); self.asis_note.setStyleSheet("color:#4b5563;")
+        self.asis_note = QLabel(); self.asis_note.setWordWrap(True); theme.role(self.asis_note, "muted")
         lv.addWidget(self.asis_note)
         g = QGroupBox("Phase"); gl = QGridLayout(g)
         self.s0 = QSlider(Qt.Horizontal); self.s0.setRange(0, 3600)
@@ -598,7 +616,7 @@ class ProcessTab(QWidget):
         for sl in (self.s0, self.s1):
             sl.setSingleStep(1); sl.setPageStep(10)
         kh = QLabel("Click a slider, then use the arrow keys for 0.1 degree steps (Page Up / Page Down: 1 degree).")
-        kh.setStyleSheet("color:#4b5563;"); kh.setWordWrap(True)
+        theme.role(kh, "muted"); kh.setWordWrap(True)
         gl.addWidget(kh, 3, 0, 1, 3)
         self.phase_box = g
         lv.addWidget(g)
@@ -606,7 +624,7 @@ class ProcessTab(QWidget):
         g2l.addWidget(QLabel("Line broadening"), 0, 0)
         self.lb = QDoubleSpinBox(); self.lb.setRange(0, 5); self.lb.setSingleStep(0.1); self.lb.setValue(0.3)
         self.lb.setSuffix(" Hz"); self.lb.editingFinished.connect(self.lb_changed); g2l.addWidget(self.lb, 0, 1)
-        self.lb_note = QLabel(""); self.lb_note.setStyleSheet("color:#4b5563;"); g2l.addWidget(self.lb_note, 0, 2)
+        self.lb_note = QLabel(""); theme.role(self.lb_note, "muted"); g2l.addWidget(self.lb_note, 0, 2)
         self.base = QCheckBox("Baseline correction (usually leave off: MANC-Q fits a smooth baseline itself)")
         self.base.toggled.connect(self.baseline_toggled); g2l.addWidget(self.base, 1, 0, 1, 3)
         g2l.addWidget(QLabel("Reference"), 2, 0); g2l.addWidget(QLabel("TSP/DSS set to 0.000 ppm automatically"), 2, 1, 1, 2)
@@ -681,10 +699,10 @@ class ProcessTab(QWidget):
     def _check_cell(self, i, s):
         if not self.needs_check(s):
             it = QTableWidgetItem("not needed")
-            it.setForeground(QBrush(QColor("#4b5563")))
+            it.setForeground(QBrush(QColor(tc("#4b5563"))))
         else:
             it = QTableWidgetItem("yes" if s["proc_checked"] else "no")
-            it.setForeground(QBrush(QColor("#15803d" if s["proc_checked"] else "#b45309")))
+            it.setForeground(QBrush(QColor(tc("#15803d" if s["proc_checked"] else "#b45309"))))
         self.table.setItem(i, 4, it)
 
     def _ensure_params(self, s):
@@ -978,12 +996,12 @@ class RegionsTab(QWidget):
         b2 = QPushButton("Remove"); b2.clicked.connect(self.remove); hb.addWidget(b2); hb.addStretch()
         lv.addLayout(hb)
         self.info = QLabel(); self.info.setWordWrap(True); self.info.setTextFormat(Qt.RichText)
-        self.info.setStyleSheet("background:#f5f3ff; color:#1f2937; border:1px solid #ddd6fe; padding:8px;")
+        theme.role(self.info, "info")
         self.info.setAlignment(Qt.AlignTop); self.info.setMinimumHeight(150)
         lv.addWidget(self.info)
         note = QLabel("Metabolites whose peaks all fall inside ignored regions are reported as \"n/m\" (not "
                       "measurable), not as zero.")
-        note.setWordWrap(True); note.setStyleSheet("color:#4b5563;"); lv.addWidget(note)
+        note.setWordWrap(True); theme.role(note, "muted"); lv.addWidget(note)
         lv.addStretch()
         split.addWidget(left)
         self.canvas = Canvas(6.2, 4.4); split.addWidget(self.canvas); split.setSizes([520, 580])
@@ -1245,7 +1263,7 @@ class SettingsTab(QWidget):
         self.workers.setValue(max(1, ncpu - 1)); g3l.addWidget(self.workers, 1, 1)
         cn = QLabel(f"This PC has {ncpu}. Each core fits one spectrum at a time, so more cores only help with "
                     "several spectra. Use fewer to keep the PC responsive for other work.")
-        cn.setWordWrap(True); cn.setStyleSheet("color:#4b5563;")
+        cn.setWordWrap(True); theme.role(cn, "muted")
         g3l.addWidget(cn, 2, 1, 1, 2)
         self.workers.setToolTip("Number of spectra fitted at the same time (one per CPU core)")
         self.overlays = QCheckBox("Write an overlay PDF for every spectrum (recommended)"); self.overlays.setChecked(True)
@@ -1387,7 +1405,7 @@ class RunTab(QWidget):
         i = self.rows.get(smp)
         if i is None:
             return
-        it = QTableWidgetItem(text); it.setForeground(QBrush(QColor(colour))); self.table.setItem(i, 2, it)
+        it = QTableWidgetItem(text); it.setForeground(QBrush(QColor(tc(colour)))); self.table.setItem(i, 2, it)
         if result is not None:
             self.table.setItem(i, 3, QTableWidgetItem(result))
 
@@ -1511,7 +1529,7 @@ class ResultsTab(QWidget):
             sw.setStyleSheet(f"background:{TIER_COL[t]}; color:{TIER_TXT[t]}; border:1px solid #d1d5db; padding:2px;")
             bar.addWidget(sw)
         bar.addStretch(); v.addLayout(bar)
-        self.where = QLabel(""); self.where.setStyleSheet("color:#4b5563;"); v.addWidget(self.where)
+        self.where = QLabel(""); theme.role(self.where, "muted"); v.addWidget(self.where)
         split = QSplitter(Qt.Horizontal)
         self.table = QTableWidget(0, 0); self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.currentCellChanged.connect(lambda r, c, *a: self.cell(r, c))
@@ -1583,7 +1601,7 @@ class ResultsTab(QWidget):
         rv.addWidget(self.toolbar); rv.addWidget(self.canvas, 1)
         hint = QLabel("Mouse wheel over the plot: zoom in and out. Magnifier: drag a box to zoom. Cross arrows: "
                       "move. House: back to the start.")
-        hint.setStyleSheet("color:#4b5563;"); hint.setWordWrap(True); rv.addWidget(hint)
+        theme.role(hint, "muted"); hint.setWordWrap(True); rv.addWidget(hint)
         self.canvas.mpl_connect("scroll_event", self.scroll)
         return right
 
@@ -1687,7 +1705,7 @@ class ResultsTab(QWidget):
             peaks_ = [p for p in rep_met.get(m, "").split(", ") if p]
             it = QTableWidgetItem(", ".join(peaks_[:2]) + (f" +{len(peaks_) - 2}" if len(peaks_) > 2 else ""))
             it.setTextAlignment(Qt.AlignCenter)
-            it.setForeground(QBrush(QColor("#111827")))
+            it.setForeground(QBrush(QColor(tc("#111827"))))
             it.setToolTip(f"{m}: measured at {rep_met[m]} ppm (reporter peak centre, median over samples)"
                           if rep_met.get(m) else f"{m}: no Quantified or Overlapped value, so no reporter peak")
             self.table.setItem(i, 0, it)
@@ -1898,7 +1916,7 @@ class ResultsTab(QWidget):
         name = os.path.basename(os.path.normpath(path))
         kind = d["kind"] if d else "2D"
         why = {"chosen": "chosen by you", "automatic": "found automatically: same title",
-               "automatic, titles differ": "<span style='color:#b91c1c'><b>found automatically, but its title is "
+               "automatic, titles differ": "<span style='color:" + theme.T("bad") + "'><b>found automatically, but its title is "
                                            "different: check it is the same sample</b></span>"}.get(how, how)
         extra = f"; moved {d['shift']:+.3f} ppm to put TSP at 0" if d and abs(d["shift"]) > 0.002 else ""
         return f"2D: <b>{kind}, EXPNO {name}</b> ({why}{extra}). Title: {d['title'] if d else ''}"
@@ -2096,7 +2114,7 @@ class TwoDCheck(QDialog):
         self.setWindowTitle(f"2D check, sample {smp}")
         self.resize(1100, 620)
         v = QVBoxLayout(self)
-        warn_ = (" <span style='color:#b91c1c'><b>The 2D was found automatically but its title differs from the "
+        warn_ = (" <span style='color:" + theme.T("bad") + "'><b>The 2D was found automatically but its title differs from the "
                  "1D: check it is the same sample.</b></span>") if how == "automatic, titles differ" else ""
         lab = QLabel(f"Sample {smp} against its {kind} (EXPNO {expno}).{warn_} For each metabolite MANC-Q predicts "
                      "where its cross peaks should be (protons coupled to each other in the library spin system, at "
@@ -2120,6 +2138,7 @@ class TwoDCheck(QDialog):
                      SortItem(r.cross_peaks)]
             if frac is not None:
                 items[3].setBackground(QBrush(QColor("#dcfce7" if frac >= 0.5 else "#fee2e2")))
+                items[3].setForeground(QBrush(QColor("#14532d" if frac >= 0.5 else "#7f1d1d")))
             for j, it in enumerate(items):
                 t.setItem(i, j, it)
         t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
@@ -2201,7 +2220,7 @@ class ReviewTab(QWidget):
         bar.addStretch()
         bo = QPushButton("Open a results folder..."); bo.clicked.connect(self.choose); bar.addWidget(bo)
         v.addLayout(bar)
-        self.where = QLabel("Open a results folder (or finish a run) to review it."); self.where.setStyleSheet("color:#4b5563;")
+        self.where = QLabel("Open a results folder (or finish a run) to review it."); theme.role(self.where, "muted")
         v.addWidget(self.where)
         split = QSplitter(Qt.Horizontal)
         left = QWidget(); lv = QVBoxLayout(left); lv.setContentsMargins(0, 0, 0, 0)
@@ -2223,7 +2242,7 @@ class ReviewTab(QWidget):
         lv.addWidget(self.table, 1)
         sh = QLabel("Click a column heading to sort (again to reverse). Ctrl+Up / Ctrl+Down: previous / next "
                     "compound.")
-        sh.setStyleSheet("color:#4b5563;"); sh.setWordWrap(True); lv.addWidget(sh)
+        theme.role(sh, "muted"); sh.setWordWrap(True); lv.addWidget(sh)
         split.addWidget(left)
         right = QWidget(); rv = QVBoxLayout(right); rv.setContentsMargins(0, 0, 0, 0)
         self.canvas = Canvas(6.4, 4.4)
@@ -2433,7 +2452,7 @@ class ReviewTab(QWidget):
         it3.setToolTip("No real signal to judge" if mis is None else
                        f"|measured - fit| around its peaks = {mis:.0%} of its own signal (lower is better)")
         if mis is not None and mis > 0.25:
-            it3.setForeground(QBrush(QColor("#b91c1c")))
+            it3.setForeground(QBrush(QColor(tc("#b91c1c"))))
         it4 = SortItem("Manually adjusted" if nt == q.MANUAL else "", 0 if nt == q.MANUAL else 1)
         if nt == q.MANUAL:
             for it in (it2, it4):
@@ -2791,8 +2810,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"MANC-Q {q.__version__}")
         self.spectra, self.folder, self.running = [], "", False
         self.tabs = QTabWidget()
-        self.tabs.setStyleSheet(f"QTabBar::tab:selected {{ color:{ACCENT}; font-weight:600; }} "
-                                "QTabBar::tab { padding: 6px 14px; }")
         self.spectra_tab = SpectraTab(self)
         self.process_tab = ProcessTab(self)
         self.regions_tab = RegionsTab(self)
@@ -2957,26 +2974,11 @@ class MainWindow(QMainWindow):
 
 def make_app(argv=None):
     app = QApplication.instance() or QApplication(argv or sys.argv)
-    # Always use a light theme: the plots, tier colours and info boxes are designed for a light background, and
-    # Windows dark mode would otherwise give white text on the light boxes.
-    try:
-        app.styleHints().setColorScheme(Qt.ColorScheme.Light)      # Qt 6.8 and later
-    except Exception:
-        pass
     app.setStyle("Fusion")
     f = QFont(); f.setFamilies(["Segoe UI", "Roboto", "Arial"]); f.setPointSize(10); app.setFont(f)
-    pal = QPalette()
-    light = {QPalette.Window: "#f3f4f6", QPalette.WindowText: "#111827", QPalette.Base: "#ffffff",
-             QPalette.AlternateBase: "#f9fafb", QPalette.ToolTipBase: "#ffffff", QPalette.ToolTipText: "#111827",
-             QPalette.PlaceholderText: "#6b7280", QPalette.Text: "#111827", QPalette.Button: "#f9fafb",
-             QPalette.ButtonText: "#111827", QPalette.BrightText: "#b91c1c", QPalette.Link: ACCENT,
-             QPalette.Highlight: ACCENT, QPalette.HighlightedText: "#ffffff", QPalette.Light: "#ffffff",
-             QPalette.Midlight: "#e5e7eb", QPalette.Mid: "#9ca3af", QPalette.Dark: "#6b7280", QPalette.Shadow: "#374151"}
-    for role, col in light.items():
-        pal.setColor(QPalette.All, role, QColor(col))
-    for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
-        pal.setColor(QPalette.Disabled, role, QColor("#6b7280"))
-    app.setPalette(pal)
+    # white or near-black following Windows' light / dark setting, purple and gold accents (gui/theme.py); the
+    # plots stay white in both modes
+    theme.apply(app)
     return app
 
 

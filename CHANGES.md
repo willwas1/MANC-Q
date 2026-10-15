@@ -2,6 +2,20 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 1.7.0 (15 October 2026)
+
+A new look for the window. Nothing about the fitting, results or files changes.
+
+* **Light and dark mode.** The window now follows the Windows light / dark setting (it used to force light),
+  with a white or near-black background, and changes while it is open. The spectra plots stay white in
+  both, like paper. `MANCQ_THEME=dark` or `light` overrides the detection.
+* **Purple and gold.** Manchester purple is the accent (main buttons, headings of each box, the selected
+  step, ticked boxes, the progress bar); Manchester gold marks the selected step and the line above the
+  status bar. Rounded buttons, boxes and fields; flat tabs.
+* All colours come from one place (`mancq/gui/theme.py`), with text contrast of at least 5 : 1 in both
+  modes (status colours such as green, amber and red are lightened in dark mode).
+* Help: a note on light and dark mode; screenshots of steps 6 and 8 updated.
+
 ## 1.6.0 (15 October 2026)
 
 * **Chemical shift assignment table for publication.** Every run (and every regrade or saved Review

@@ -20,7 +20,7 @@ args = ["--noconfirm", "--clean", "--windowed", "--name", "MANC-Q", "--paths", R
         "--hidden-import", "mancq.gui.app", "--hidden-import", "mancq.gui.runner",
         "--hidden-import", "mancq.manual", "--hidden-import", "mancq.regrade",
         "--hidden-import", "mancq.figures", "--hidden-import", "mancq.gui.figures_tab",
-        "--hidden-import", "mancq.shifttable"]
+        "--hidden-import", "mancq.shifttable", "--hidden-import", "mancq.gui.theme"]
 for m in EXCLUDE:
     args += ["--exclude-module", m]
 args.append(os.path.join(HERE, "mancq_app.py"))
