@@ -1,3 +1,5 @@
+<img src="docs/images/logo.png" width="96" alt="MANC-Q logo">
+
 # MANC-Q
 
 **M**etabolite **A**bundance by **N**MR **C**urve-fitting, **Q**uantified. Developed at the University of Manchester.

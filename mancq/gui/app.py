@@ -22,12 +22,14 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.widgets import SpanSelector
 
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QUrl
-from PySide6.QtGui import QFont, QColor, QPalette, QBrush, QAction, QKeySequence, QShortcut, QImage, QTextDocument
+from PySide6.QtGui import (QFont, QColor, QPalette, QBrush, QAction, QKeySequence, QShortcut, QImage, QTextDocument,
+                           QIcon, QPixmap)
 from PySide6.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
                                QLabel, QPushButton, QLineEdit, QTableWidget, QTableWidgetItem, QGroupBox, QComboBox,
                                QDoubleSpinBox, QRadioButton, QCheckBox, QProgressBar, QPlainTextEdit, QSlider,
                                QHeaderView, QSplitter, QSpinBox, QStatusBar, QFileDialog, QMessageBox, QButtonGroup,
-                               QAbstractItemView, QSizePolicy, QDialog, QTextBrowser, QSystemTrayIcon, QStyle)
+                               QAbstractItemView, QSizePolicy, QDialog, QTextBrowser, QSystemTrayIcon, QStyle,
+                               QMenu)
 
 from mancq import engine as q
 from mancq import fidproc as fp
@@ -53,6 +55,26 @@ CACHE = os.path.join(os.path.expanduser("~"), ".mancq_cache")
 PREFS_FILE = os.environ.get("MANCQ_PREFS") or os.path.join(
     os.environ.get("APPDATA") or os.path.expanduser("~"), "MANC-Q", "window_settings.json")
 HELP_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "help")
+ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")      # the MANC-Q logo (packaging/make_logo.py)
+
+
+def logo_pixmap(px):
+    """The MANC-Q logo at px pixels (sharp on high-resolution screens)."""
+    from PySide6.QtWidgets import QApplication as _QA
+    ratio = _QA.instance().devicePixelRatio() if _QA.instance() else 1.0
+    want = int(round(px * ratio))
+    best = next((n for n in (16, 24, 32, 48, 64, 128, 256) if n >= want), 256)
+    pm = QPixmap(os.path.join(ASSETS, f"mancq_logo_{best}.png"))
+    if pm.isNull():
+        return pm
+    pm = pm.scaled(want, want, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    pm.setDevicePixelRatio(ratio)
+    return pm
+
+
+def logo_icon():
+    f = os.path.join(ASSETS, "mancq.ico")
+    return QIcon(f) if os.path.exists(f) else QIcon()
 
 
 def tc(colour):
@@ -71,6 +93,19 @@ def _tier_colours():
 
 
 theme.on_change(_tier_colours)
+
+
+def _toolbar_icons():
+    """The zoom / pan toolbars above the plots pick light or dark icons from the window colour: redraw them."""
+    from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
+    for w in QApplication.allWidgets():
+        if isinstance(w, NavigationToolbar2QT):
+            for text, tip, image, callback in w.toolitems:
+                if text and callback in getattr(w, "_actions", {}):
+                    w._actions[callback].setIcon(w._icon(image + ".png"))
+
+
+theme.on_change(_toolbar_icons)
 
 
 # ============================================================================ helpers
@@ -160,6 +195,10 @@ def show_help(parent, step):
     sections, whole = help_sections()
     dlg = QDialog(parent); dlg.setWindowTitle("MANC-Q help"); dlg.resize(860, 720)
     v = QVBoxLayout(dlg)
+    top = QHBoxLayout()
+    lg = QLabel(); lg.setPixmap(logo_pixmap(40)); top.addWidget(lg)
+    tl = QLabel(f"MANC-Q {q.__version__} help"); tl.setObjectName("step_heading"); top.addWidget(tl); top.addStretch()
+    v.addLayout(top)
     tb = QTextBrowser(); tb.setOpenExternalLinks(True); tb.setSearchPaths([HELP_DIR])
     doc = tb.document()
     imgs = os.path.join(HELP_DIR, "images")
@@ -168,7 +207,7 @@ def show_help(parent, step):
             im = QImage(os.path.join(imgs, fn))
             if not im.isNull():
                 doc.addResource(QTextDocument.ImageResource, QUrl(f"images/{fn}"),
-                                im.scaledToWidth(780, Qt.SmoothTransformation))
+                                im.scaledToWidth(780, Qt.SmoothTransformation) if im.width() > 780 else im)
     if not whole:
         tb.setPlainText("The guide was not found. It is in docs/QUICKSTART_GUI.md on the MANC-Q GitHub page.")
     else:
@@ -2827,6 +2866,7 @@ class MainWindow(QMainWindow):
         self.renumber_steps()
         self.tabs.currentChanged.connect(self.tab_changed)
         self.setCentralWidget(self.tabs)
+        self.make_menu()
         sb = QStatusBar()
         sb.showMessage(f"MANC-Q {q.__version__}  |  Metabolite Abundance by NMR Curve-fitting, Quantified  |  "
                        "University of Manchester")
@@ -2835,6 +2875,54 @@ class MainWindow(QMainWindow):
         self.prefs = load_prefs()
         self.restore_prefs()
         sys.excepthook = self.unexpected_error
+
+    def make_menu(self):
+        """File menu in the top left corner; the logo and name at the other end of the menu bar."""
+        mb = self.menuBar()
+        fm = self.file_menu = QMenu("&File", mb)          # kept by the window, so Python does not delete it
+        mb.addMenu(fm)
+        a = fm.addAction("Open a results folder...")
+        a.triggered.connect(lambda: (self.tabs.setCurrentWidget(self.results_tab), self.results_tab.choose()))
+        fm.addSeparator()
+        self.dark_action = fm.addAction("Dark mode")
+        self.dark_action.setCheckable(True)
+        self.dark_action.setChecked(theme.dark())
+        self.dark_action.setToolTip("A black window instead of a white one (the plots stay white). Remembered for next time.")
+        self.dark_action.toggled.connect(self.set_dark)
+        fm.addSeparator()
+        fm.addAction("Help (quick start guide)").triggered.connect(lambda: show_help(self, 0))
+        fm.addAction("About MANC-Q").triggered.connect(self.about)
+        fm.addSeparator()
+        qa = fm.addAction("Quit"); qa.setShortcut(QKeySequence.Quit); qa.triggered.connect(self.close)
+        brand = QWidget(); bl = QHBoxLayout(brand); bl.setContentsMargins(0, 0, 6, 0); bl.setSpacing(6)
+        lg = QLabel(); lg.setPixmap(logo_pixmap(20)); bl.addWidget(lg)
+        nm = QLabel("MANC-Q"); nm.setObjectName("brand"); bl.addWidget(nm)
+        self.tabs.setCornerWidget(brand, Qt.TopRightCorner)     # the logo and name, level with the steps
+
+    def set_dark(self, on):
+        theme.apply(QApplication.instance(), "dark" if on else "light")
+        self.prefs["theme"] = "dark" if on else "light"
+        save_prefs(self.prefs)
+        # tables whose cells were coloured when they were filled: fill them again in the new colours
+        cur = getattr(self.results_tab, "cur", None)
+        if self.results_tab.data is not None:
+            self.results_tab.fill()
+            if cur is not None:
+                self.results_tab.select_metabolite(cur[0])
+        if getattr(self.review_tab, "fit", None) is not None:
+            try:
+                self.review_tab.fill()
+            except Exception:
+                pass
+
+    def about(self):
+        box = QMessageBox(self)
+        box.setWindowTitle("About MANC-Q")
+        box.setIconPixmap(logo_pixmap(64))
+        box.setText(f"<b>MANC-Q {q.__version__}</b><br>Metabolite Abundance by NMR Curve-fitting, Quantified<br>"
+                    "Will Smith, University of Manchester<br>"
+                    "<a href='https://github.com/willwas1/MANC-Q'>github.com/willwas1/MANC-Q</a>")
+        box.exec()
 
     def unexpected_error(self, etype, value, tb):
         """Errors nobody expected: show them (with a copy button) instead of failing silently."""
@@ -2976,9 +3064,16 @@ def make_app(argv=None):
     app = QApplication.instance() or QApplication(argv or sys.argv)
     app.setStyle("Fusion")
     f = QFont(); f.setFamilies(["Segoe UI", "Roboto", "Arial"]); f.setPointSize(10); app.setFont(f)
-    # white or near-black following Windows' light / dark setting, purple and gold accents (gui/theme.py); the
+    if os.name == "nt":                     # its own taskbar icon, not Python's
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("MANC-Q.MANC-Q")
+        except Exception:
+            pass
+    app.setWindowIcon(logo_icon())
+    # light (white) unless dark mode was chosen in File > Dark mode; purple and gold accents (gui/theme.py); the
     # plots stay white in both modes
-    theme.apply(app)
+    theme.apply(app, "dark" if load_prefs().get("theme") == "dark" else "light")
     return app
 
 

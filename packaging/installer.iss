@@ -1,7 +1,7 @@
 ; Inno Setup script: turns dist\MANC-Q into a normal Windows installer (MANC-Q-setup.exe).
 ; Install Inno Setup (free, jrsoftware.org), open this file, click Compile. Run build_windows.bat first. (GitHub Actions does both automatically.)
 #ifndef MyAppVersion
-  #define MyAppVersion "1.7.0"
+  #define MyAppVersion "1.8.0"
 #endif
 
 [Setup]
@@ -18,6 +18,8 @@ SolidCompression=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 WizardStyle=modern
+SetupIconFile=..\mancq\gui\assets\mancq.ico
+UninstallDisplayIcon={app}\MANC-Q.exe
 
 [Files]
 Source: "..\dist\MANC-Q\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion

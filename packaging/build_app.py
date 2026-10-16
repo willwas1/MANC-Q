@@ -17,6 +17,8 @@ EXCLUDE = ["PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtQ
 args = ["--noconfirm", "--clean", "--windowed", "--name", "MANC-Q", "--paths", ROOT,
         "--add-data", os.path.join(ROOT, "mancq", "library") + os.pathsep + "mancq/library",
         "--add-data", os.path.join(ROOT, "mancq", "help") + os.pathsep + "mancq/help",
+        "--add-data", os.path.join(ROOT, "mancq", "gui", "assets") + os.pathsep + "mancq/gui/assets",
+        "--icon", os.path.join(ROOT, "mancq", "gui", "assets", "mancq.ico"),
         "--hidden-import", "mancq.gui.app", "--hidden-import", "mancq.gui.runner",
         "--hidden-import", "mancq.manual", "--hidden-import", "mancq.regrade",
         "--hidden-import", "mancq.figures", "--hidden-import", "mancq.gui.figures_tab",

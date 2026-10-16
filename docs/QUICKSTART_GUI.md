@@ -1,3 +1,5 @@
+![MANC-Q](images/logo.png)
+
 # MANC-Q quick start (graphical interface)
 
 You need: a folder of Bruker 1D ¹H experiments (processed in TopSpin, or raw FIDs), and the TSP (or DSS)
@@ -9,8 +11,9 @@ Every step has a **Help** button (top right) that shows its part of this guide. 
 dataset folder, reference concentration, dilution, regions and other settings for next time; check them before
 each run. (They are kept in `window_settings.json` in your AppData\MANC-Q folder; delete it to start afresh.)
 
-MANC-Q follows the Windows light or dark setting (Settings > Personalisation > Colours), and switches
-while it is open. The spectra plots stay white in both, like paper.
+The **File** menu (top left) opens a results folder, the help and About, and has **Dark mode**: tick it
+for a black window instead of the usual white one (the spectra plots stay white, like paper). MANC-Q
+remembers your choice.
 
 ## 1 Spectra
 

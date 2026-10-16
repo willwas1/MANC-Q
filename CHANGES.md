@@ -2,6 +2,19 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 1.8.0 (16 October 2026)
+
+* **File menu and a dark mode switch.** A **File** menu in the top left corner: Open a results folder,
+  **Dark mode**, Help, About and Quit. The window is now light (white) by default; tick **Dark mode** for
+  the black window. The choice is remembered, and MANC-Q no longer follows the Windows setting. Switching
+  redraws the tables and the plot toolbars in the new colours.
+* **The MANC-Q logo.** The lactate CH quartet as a white measured spectrum over its gold fitted area, on a
+  Manchester-purple tile. It is the window and taskbar icon, sits beside the steps at the top of the window,
+  heads the Help and About windows, the desktop shortcut (`python -m mancq shortcut`, make it again to
+  get the new icon), the installer and the .exe, and the top of README and the quick start guide. All logo
+  files are drawn by `packaging/make_logo.py` (in `mancq/gui/assets/`).
+* Help pictures smaller than the help window are no longer stretched.
+
 ## 1.7.0 (15 October 2026)
 
 A new look for the window. Nothing about the fitting, results or files changes.

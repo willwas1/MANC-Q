@@ -50,10 +50,13 @@ em dashes in anything you write for him.
 * University Windows PC. Unsigned programs (the installer, MANC-Q.bat) are blocked by IT; he runs MANC-Q in
   Anaconda (`C:\Anaconda`). Install there with `python -m pip install -e . --no-deps --force-reinstall`
   (no `--no-deps` breaks on Anaconda's own PySide6/shiboken6). Desktop shortcut: `python -m mancq shortcut`.
-* Look (agreed with Will, 1.7.0): the window follows the Windows light / dark setting (white or near-black
-  background), Manchester purple accent, Manchester gold for highlights only (never as text on white);
+* Look (agreed with Will, 1.7.0 / 1.8.0): light (white) by default; File > Dark mode switches to near black and
+  is remembered (it does not follow Windows). Manchester purple accent, Manchester gold for highlights only (never as text on white);
   colours come from `mancq/gui/theme.py` tokens, not hex values in widgets. Plots inside the window stay white
-  in both modes. Keep text contrast at 4.5:1 or better. `MANCQ_THEME=dark|light` overrides the detection.
+  in both modes. Keep text contrast at 4.5:1 or better. `MANCQ_THEME=dark|light` overrides the choice.
+* Logo: merge 2 chosen by Will (lactate quartet, white line over gold fitted area, purple tile). Drawn by
+  `packaging/make_logo.py` (needs PySide6 + Pillow) into `mancq/gui/assets/` (SVG, PNGs, mancq.ico) and the
+  docs/help `logo.png`; re-run it after changing the drawing. Never use the University of Manchester crest.
 
 ## Known open items
 

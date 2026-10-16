@@ -1,9 +1,9 @@
-"""MANC-Q window theme: white or near-black background following the Windows light / dark setting, Manchester
-purple as the accent, Manchester gold for highlights (the selected step, the status line). One set of colour
-tokens per mode; widgets take their colours from here (by a "role" property in the style sheet, or from T()), so
-the whole window changes when Windows switches between light and dark. Plots stay white in both modes, like
-paper. Every text colour keeps a contrast of at least 4.5 : 1 against its background; gold is used only for
-lines and fills, never for text on white (it would be too faint)."""
+"""MANC-Q window theme: light (white) by default, dark (near black) when switched on with File > Dark mode,
+Manchester purple as the accent, Manchester gold for highlights (the selected step, the status line). One set of
+colour tokens per mode; widgets take their colours from here (by a "role" property in the style sheet, or from
+T()), so the whole window changes when the mode is switched. Plots stay white in both modes, like paper. Every
+text colour keeps a contrast of at least 4.5 : 1 against its background; gold is used only for lines and fills,
+never for text on white (it would be too faint)."""
 import os
 
 from PySide6.QtCore import Qt
@@ -22,21 +22,17 @@ DARK = dict(bg="#0B0A0D", surface="#16131A", surface2="#211C27", text="#F2EEF6",
 
 _current = dict(LIGHT)
 _dark = False
+_mode = "light"              # chosen in the window (File > Dark mode), remembered between sessions
 _listeners = []
 
 
 def is_dark(app=None):
-    """True when Windows (or the desktop) is set to dark mode. The environment variable MANCQ_THEME=dark or
-    MANCQ_THEME=light overrides it."""
+    """True when dark mode is chosen. The environment variable MANCQ_THEME=dark or MANCQ_THEME=light overrides
+    the choice (e.g. for screenshots)."""
     force = os.environ.get("MANCQ_THEME", "").strip().lower()
     if force in ("dark", "light"):
         return force == "dark"
-    try:
-        from PySide6.QtWidgets import QApplication
-        app = app or QApplication.instance()
-        return app.styleHints().colorScheme() == Qt.ColorScheme.Dark
-    except Exception:
-        return False
+    return _mode == "dark"
 
 
 def T(name):
@@ -145,6 +141,17 @@ QProgressBar {{ border: 1px solid {c['line']}; border-radius: 5px; background: {
 QProgressBar::chunk {{ background: {c['accent']}; border-radius: 4px; }}
 QStatusBar {{ background: {c['surface']}; color: {c['muted']}; border-top: 2px solid {c['gold']}; }}
 QToolTip {{ background: {c['surface2']}; color: {c['text']}; border: 1px solid {c['line']}; padding: 4px; }}
+QMenuBar {{ background: {c['bg']}; color: {c['text']}; border-bottom: 1px solid {c['line']}; padding: 2px 4px; }}
+QMenuBar::item {{ background: transparent; padding: 4px 10px; border-radius: 5px; }}
+QMenuBar::item:selected {{ background: {c['surface2']}; }}
+QMenu {{ background: {c['bg']}; color: {c['text']}; border: 1px solid {c['line']}; padding: 4px; }}
+QMenu::item {{ padding: 5px 24px 5px 24px; border-radius: 4px; }}
+QMenu::item:selected {{ background: {c['accent']}; color: {c['accent_text']}; }}
+QMenu::separator {{ height: 1px; background: {c['line']}; margin: 4px 8px; }}
+QMenu::indicator {{ width: 14px; height: 14px; left: 5px; border: 1px solid {c['edge']}; border-radius: 3px;
+                   background: {c['bg']}; }}
+QMenu::indicator:checked {{ background: {c['accent']}; border-color: {c['accent']}; {tick_css} }}
+QLabel#brand {{ font-weight: 700; color: {c['accent_fg']}; padding-right: 6px; }}
 QSplitter::handle {{ background: {c['line']}; }}
 """
 
@@ -165,9 +172,11 @@ def palette(c):
     return pal
 
 
-def apply(app):
-    """Set the palette and style sheet for the current Windows mode, and follow later changes."""
-    global _dark
+def apply(app, mode=None):
+    """Set the palette and style sheet: mode "light" (the default) or "dark"; None keeps the current choice."""
+    global _dark, _mode
+    if mode in ("light", "dark"):
+        _mode = mode
     _dark = is_dark(app)
     _current.clear(); _current.update(DARK if _dark else LIGHT)
     app.setPalette(palette(_current))
@@ -175,11 +184,5 @@ def apply(app):
     for fn in list(_listeners):
         try:
             fn()
-        except Exception:
-            pass
-    if not getattr(app, "_mancq_theme_hooked", False):
-        try:
-            app.styleHints().colorSchemeChanged.connect(lambda *a: apply(app))
-            app._mancq_theme_hooked = True
         except Exception:
             pass

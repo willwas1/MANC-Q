@@ -39,6 +39,8 @@ def make_shortcut(name="MANC-Q"):
     else:
         args = "-m mancq gui"
         how = "this Python"
+    ico = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gui", "assets", "mancq.ico")
+    icon = ico if os.path.exists(ico) else pythonw + ",0"     # the MANC-Q logo
     workdir = os.path.join(os.path.expanduser("~"), "Documents")
     if not os.path.isdir(workdir):
         workdir = os.path.expanduser("~")
@@ -47,7 +49,7 @@ def make_shortcut(name="MANC-Q"):
           "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($p); "
           f"$s.TargetPath = {_ps(pythonw)}; $s.Arguments = {_ps(args)}; "
           f"$s.WorkingDirectory = {_ps(workdir)}; $s.Description = 'MANC-Q NMR metabolite quantification'; "
-          f"$s.IconLocation = {_ps(pythonw + ',0')}; $s.Save(); Write-Output $p")
+          f"$s.IconLocation = {_ps(icon)}; $s.Save(); Write-Output $p")
     r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True)
     if r.returncode != 0 or not r.stdout.strip():
         print("Could not make the shortcut automatically. Make it by hand instead:\n"
