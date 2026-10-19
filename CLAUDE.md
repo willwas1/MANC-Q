@@ -8,9 +8,16 @@ em dashes in anything you write for him.
 
 ## Rules (agreed with Will)
 
-* Every change to the tool, however small, gets a new version number (1.1.2 -> 1.1.3 ...). Raise it in all of:
-  `pyproject.toml`, `mancq/engine.py` (`__version__`), `CITATION.cff`, `packaging/installer.iss`
-  (`MyAppVersion`), and the first line of `constraints.txt`. Add an entry at the top of `CHANGES.md`.
+* Every change to the tool, however small, gets a new version number (1.1.2 -> 1.1.3 ...). The number is kept
+  only in `pyproject.toml` (MANC-Q reads it from there, or from the installed package's metadata). Set it with
+  `python packaging/set_version.py X.Y.Z`, which also copies it into `CITATION.cff` (with today's date),
+  `packaging/installer.iss` and the first line of `constraints.txt`. Add an entry at the top of `CHANGES.md`.
+* Settings: `SETTINGS` at the top of `engine.py` are the defaults and are never changed while MANC-Q runs. Each
+  run makes its own `Settings` object and passes it to every function that needs it (as `S=`); it is saved in
+  `_per_sample/run_settings.json` and read back with `Settings.load(out)`. Reading results folders, including
+  everything needed for older ones, goes through `mancq/results.py` (`load_results`, `load_fit`); raise
+  `RESULTS_FORMAT` in `engine.py` when the folder layout changes.
+* Line endings: keep each file's existing ending when editing (`mancq/engine.py` is LF, `gui/app.py` CRLF).
 * Commit each version separately with a clear message, tag it `vX.Y.Z`, and only push or publish a release
   when Will says so. Publishing a GitHub release runs `.github/workflows/build-windows.yml`, which builds and
   attaches `MANC-Q-setup.exe`, a portable zip and `SHA256SUMS.txt`.

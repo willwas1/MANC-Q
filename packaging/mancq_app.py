@@ -19,7 +19,8 @@ if __name__ == "__main__":
         good = chk[chk.tier.isin(["Quantified", "Overlapped (semi-quantitative)"])]
         msg = (f"MANC-Q self-test: median recovered/true = {good.ratio.median():.3f} over {len(good)} values; "
                + ("all checks passed" if not fails else f"{len(fails)} checks FAILED:\n" + "\n".join(fails)))
-        open(os.path.join(out, "selftest.txt"), "w").write(msg + "\n")
+        with open(os.path.join(out, "selftest.txt"), "w", encoding="utf-8") as fh:
+            fh.write(msg + "\n")
         print(msg)
         sys.exit(1 if fails else 0)
     from mancq.gui.app import main

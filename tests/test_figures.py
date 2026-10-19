@@ -1,5 +1,6 @@
 """Checks of the figure tool (mancq.figures) on a small synthetic results folder only.
 Run with:  python -m pytest tests   (or:  python tests/test_figures.py)"""
+from pathlib import Path
 import os
 import sys
 import struct
@@ -62,9 +63,9 @@ def read_tiff(path):
 def test_sample_sheet_forgiving():
     with tempfile.TemporaryDirectory() as d:
         f = os.path.join(d, "sheet.csv")
-        open(f, "w", encoding="cp1252").write(
-            "EXPNO;Condition;Time (h);Rep;Viability (%)\n10;Fed batch;0 h;1;98\n11.0;Fed batch;2 d;2;97\n"
-            "12;Fed batch;day 3;1;95\n99;Ghost;5;1;90\n;;;;\n10;dup;5;1;1\n13;Batch;soon;1;80\n")
+        with open(f, "w", encoding="cp1252") as fh:      # as Excel saves a CSV on Windows
+            fh.write("EXPNO;Condition;Time (h);Rep;Viability (%)\n10;Fed batch;0 h;1;98\n11.0;Fed batch;2 d;2;97\n"
+                     "12;Fed batch;day 3;1;95\n99;Ghost;5;1;90\n;;;;\n10;dup;5;1;1\n13;Batch;soon;1;80\n")
         df, warns = F.read_sample_sheet(f, ["10", "11", "12", "13"])
         assert list(df["sample"]) == ["10", "11", "12", "99", "13"]
         assert list(df["time_h"].iloc[:3]) == [0.0, 48.0, 72.0] and np.isnan(df["time_h"].iloc[4])
@@ -126,7 +127,7 @@ def test_templates_and_export():
         files = F.export(spec, d, os.path.join(d, "figs", "rep"), ["pdf", "svg", "tiff"],
                          ["caption", "data", "record", "script"], sheet=sheet)
         assert all(os.path.exists(x) for x in files) and len(files) == 8
-        assert "1, formate; 2, lactate" in open(os.path.join(d, "figs", "rep_caption.txt")).read()
+        assert "1, formate; 2, lactate" in Path(os.path.join(d, "figs", "rep_caption.txt")).read_text(encoding="utf-8")
         w, h, spp, dpi, px = read_tiff(os.path.join(d, "figs", "rep.tif"))
         assert dpi == 1200 and abs(w - 85 / 25.4 * 1200) < 2 and abs(h - 50 / 25.4 * 1200) < 2
         assert px.size == w * h * spp and px.min() == 0 and px.max() == 255

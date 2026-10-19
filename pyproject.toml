@@ -4,13 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mancq"
-version = "1.9.2"
+version = "1.10.0"
 description = "MANC-Q: Metabolite Abundance by NMR Curve-fitting, Quantified. 1H NMR metabolite quantification by whole-spectrum fitting of simulated GISSMO spin systems"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = { file = "LICENSE" }
 authors = [{ name = "William Smith" }]
-dependencies = ["numpy>=1.23", "scipy>=1.10", "pandas>=1.5", "matplotlib>=3.6", "nmrglue>=0.9", "openpyxl>=3.0", "PySide6-Essentials>=6.5"]
+# the lowest versions tested (an Anaconda install on Windows, Python 3.13); constraints.txt has the newest tested
+dependencies = ["numpy>=2.3", "scipy>=1.16", "pandas>=2.3", "matplotlib>=3.10", "nmrglue>=0.12", "openpyxl>=3.1",
+                "PySide6-Essentials>=6.9"]
 
 [project.scripts]
 mancq = "mancq.__main__:main"

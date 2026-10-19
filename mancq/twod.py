@@ -23,7 +23,9 @@ SEEN_SNR = 10.0         # a cross peak counts as seen when a peak top there is t
 
 def _jcamp(f):
     out = {}
-    for line in open(f, errors="replace"):
+    with open(f, encoding="latin-1") as fh:
+        lines = fh.read().splitlines()
+    for line in lines:
         if line.startswith("##$"):
             k, _, v = line[3:].partition("=")
             v = v.strip()
@@ -41,7 +43,8 @@ def is_2d(expdir, procno=1):
 def title(expdir, procno=1):
     for p in (os.path.join(expdir, "pdata", str(procno), "title"), os.path.join(expdir, "pdata", "1", "title")):
         if os.path.exists(p):
-            return open(p, errors="replace").read().strip()
+            with open(p, encoding="latin-1") as fh:
+                return fh.read().strip()
     return ""
 
 
@@ -159,7 +162,8 @@ def read_links(out):
     f = _links_file(out)
     if os.path.exists(f):
         try:
-            return dict(json.load(open(f)).get("links", {}))
+            with open(f, encoding="utf-8") as fh:
+                return dict(json.load(fh).get("links", {}))
         except (ValueError, OSError):
             return {}
     return {}
@@ -173,8 +177,9 @@ def save_link(out, smp, path):
     else:
         links[str(smp)] = path
     os.makedirs(os.path.dirname(_links_file(out)), exist_ok=True)
-    json.dump(dict(about="2D spectrum shown for each sample in the MANC-Q Results step (chosen by hand); "
-                         "\"\" = none", links=links), open(_links_file(out), "w"), indent=1)
+    with open(_links_file(out), "w", encoding="utf-8") as fh:
+        json.dump(dict(about="2D spectrum shown for each sample in the MANC-Q Results step (chosen by hand); "
+                             "\"\" = none", links=links), fh, indent=1)
 
 
 def sample_dir(out, smp):
@@ -183,7 +188,8 @@ def sample_dir(out, smp):
     if not os.path.exists(f):
         return None
     try:
-        s = json.load(open(f))
+        with open(f, encoding="utf-8") as fh:
+            s = json.load(fh)
     except (ValueError, OSError):
         return None
     # the original folder first: spectra MANC-Q processed itself (from a FID) sit in <results>/_processed,

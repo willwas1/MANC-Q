@@ -172,15 +172,95 @@ plt = _plt
 
 from .spinsim import simulate_spin_system, merge_sticks
 
-__version__ = "1.9.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _read_version():
+    """The version number, kept in one place: pyproject.toml. Read from that file when MANC-Q runs from its own
+    folder (so an editable install never reports an old number), otherwise from the installed package's
+    metadata (importlib.metadata; also in the Windows app)."""
+    pp = os.path.join(os.path.dirname(HERE), "pyproject.toml")
+    if os.path.exists(pp):
+        import re
+        with open(pp, encoding="utf-8") as fh:
+            text = fh.read()
+        m = re.search(r'^version\s*=\s*"([^"]+)"', text, re.M)
+        if m and re.search(r'^name\s*=\s*"mancq"', text, re.M):
+            return m.group(1)
+    try:
+        from importlib.metadata import version
+        return version("mancq")
+    except Exception:
+        return "unknown"
+
+
+__version__ = _read_version()
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
-S = SETTINGS
 import copy as _copy
-DEFAULT_SETTINGS = _copy.deepcopy(SETTINGS)
+DEFAULT_SETTINGS = SETTINGS       # the defaults above; never changed while MANC-Q runs
 TIMING = {}
+RESULTS_FORMAT = 2                # version of the results folder layout (1 = MANC-Q 1.9.2 and earlier)
+
+
+class Settings(dict):
+    """The settings of one run: the defaults in SETTINGS with this run's changes. Each run makes its own and
+    passes it to every function that needs it (as S); it is saved with the results (run_settings.json) and
+    read back by regrade, the Review step and apply-edits. A misspelt setting name is an error, not ignored."""
+    RUNTIME = {"RUN_ID", "LIBRARY_HASH", "PROCESSING_USED", "MANCQ_VERSION", "RUN_SAMPLES", "RUN_COMPLETE",
+               "RESULTS_FORMAT"}
+
+    def __init__(self, *changes, **kw):
+        super().__init__(_copy.deepcopy(SETTINGS))
+        self.update(*changes, **kw)
+
+    def __setitem__(self, k, v):
+        if k not in SETTINGS and k not in self.RUNTIME:
+            raise KeyError(f"unknown setting {k!r}")
+        super().__setitem__(k, v)
+
+    def update(self, *changes, **kw):
+        for d in changes + (kw,):
+            for k, v in dict(d).items():
+                self[k] = v
+
+    def setdefault(self, k, v=None):
+        if k not in self:
+            self[k] = v
+        return self[k]
+
+    def __reduce__(self):            # pickled to the worker processes as a plain mapping
+        return (Settings, (dict(self),))
+
+    def save(self, path, **extra):
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(dict({k: v for k, v in self.items() if k != "OVERLAY_REGIONS"}, MANCQ_VERSION=__version__,
+                           RESULTS_FORMAT=RESULTS_FORMAT, **extra), fh, indent=1, default=str)
+
+    @classmethod
+    def load(cls, out):
+        """The settings a results folder was made with (_per_sample/run_settings.json), or the defaults if it has
+        none. Settings this version does not know are left out; JSON lists are turned back into tuples where the
+        default is a tuple."""
+        f = os.path.join(out, "_per_sample", "run_settings.json")
+        saved = {}
+        if os.path.exists(f):
+            with open(f, encoding="utf-8") as fh:
+                saved = json.load(fh)
+        S = cls()
+        for k, v in saved.items():
+            if k not in SETTINGS and k not in cls.RUNTIME:
+                continue
+            dflt = SETTINGS.get(k)
+            if isinstance(dflt, tuple) and isinstance(v, list):
+                v = tuple(v)
+            elif isinstance(dflt, list) and dflt and isinstance(dflt[0], tuple) and isinstance(v, list):
+                v = [tuple(x) for x in v]
+            S[k] = v
+        S.pop("SAMPLE_DIRS", None)
+        S["SAMPLE_DIRS"] = None
+        return S
 
 
 # =============================================================================
@@ -200,7 +280,7 @@ def _json_default(v):
     raise TypeError(f"cannot save {type(v)}")
 
 
-def read_spectrum(expdir, procno):
+def read_spectrum(expdir, procno, *, S):
     pdir = os.path.join(expdir, "pdata", str(procno))
     name = os.path.basename(os.path.normpath(expdir))
     if os.path.exists(os.path.join(expdir, "acqu2s")) or os.path.exists(os.path.join(pdir, "2rr")):
@@ -241,7 +321,8 @@ def read_spectrum(expdir, procno):
     title = ""
     tf = os.path.join(pdir, "title")
     if os.path.exists(tf):
-        title = open(tf, errors="ignore").read().strip()
+        with open(tf, encoding="latin-1") as fh:
+            title = fh.read().strip()
     return ppm, y, sf, title
 
 
@@ -313,7 +394,7 @@ def read_acquisition(expdir):
     return out
 
 
-def read_dilutions(path, samples=None, log=None):
+def read_dilutions(path, samples=None, log=None, *, S):
     """{sample: dilution} from a CSV or Excel file with the sample in the first column and the dilution in the
     second (headers, EXPNO prefixes and 10.0 for 10 are tolerated). With samples, every sample without an entry
     and every entry with no sample is reported through log."""
@@ -375,7 +456,7 @@ def noise_sigma(ppm, y, why=None):
     return float(1.4826 * np.median(np.abs(d2 - np.median(d2))) / np.sqrt(6.0))
 
 
-def fit_tsp(ppm, y, sf):
+def fit_tsp(ppm, y, sf, *, S):
     """Pseudo-Voigt main line + 29Si doublet (J 6.6 Hz) + linear baseline."""
     m = (ppm > -0.2) & (ppm < 0.2)
     if not m.any():
@@ -433,7 +514,7 @@ def shift_from_ph(ph, limits, pka):
     return float(d_ha - f * (d_ha - d_a))
 
 
-def _peak_candidates(ppm, y, sigma, window):
+def _peak_candidates(ppm, y, sigma, window, *, S):
     """Peaks in a ppm window at least PH_MIN_SNR x noise tall: [(position, height SNR)], position refined with a
     3-point parabola through the maximum. ppm must be ascending and evenly spaced."""
     lo, hi = window
@@ -455,13 +536,13 @@ def _peak_candidates(ppm, y, sigma, window):
     return out
 
 
-def estimate_ph(ppm, y, sigma):
+def estimate_ph(ppm, y, sigma, *, S):
     """Estimated pH in the NMR tube from the histidine H2 and H4 singlets (TSP-referenced ppm, ascending).
     Returns pH_est (mean of the protons found), pH_H2, pH_H4, his_H2_ppm, his_H4_ppm and pH_flag
     (ok / one_proton_only / protons_disagree / no_histidine). An estimate: see the PH_ settings."""
     pka, l2, l4 = S["PH_HIS_PKA"], tuple(S["PH_HIS_H2_LIMITS"]), tuple(S["PH_HIS_H4_LIMITS"])
-    c2 = _peak_candidates(ppm, y, sigma, S["PH_HIS_H2_WINDOW"])
-    c4 = _peak_candidates(ppm, y, sigma, S["PH_HIS_H4_WINDOW"])
+    c2 = _peak_candidates(ppm, y, sigma, S["PH_HIS_H2_WINDOW"], S=S)
+    c4 = _peak_candidates(ppm, y, sigma, S["PH_HIS_H4_WINDOW"], S=S)
     h2 = max(c2, key=lambda c: c[1]) if c2 else None        # tallest peak in each window
     h4 = max(c4, key=lambda c: c[1]) if c4 else None
     if h2 and h4 and abs(ph_from_shift(h2[0], l2, pka) - ph_from_shift(h4[0], l4, pka)) > S["PH_MAX_DISAGREE"]:
@@ -486,7 +567,7 @@ def estimate_ph(ppm, y, sigma):
                 pH_flag=flag)
 
 
-def histidine_targets(ph):
+def histidine_targets(ph, *, S):
     """{'H2'|'H4': (target ppm, half window Hz)} for placing histidine in the fit from a pH estimate: the
     measured peak where it was seen, else the position the other proton's pH predicts (wider window)."""
     out = {}
@@ -506,7 +587,9 @@ def histidine_targets(ph):
 # =============================================================================
 def parse_gissmo(path):
     lib = {}
-    for line in open(path):
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    for line in text.splitlines():
         line = line.rstrip("\n")
         if not line or line.startswith("#"):
             continue
@@ -529,16 +612,18 @@ def parse_gissmo(path):
 ANOMER_WEIGHTS = {"D-Glucose": {5.2223: 0.36, 4.6360: 0.64}}
 
 
-def build_library(sf, libdir, cache_dir):
+def build_library(sf, libdir, cache_dir, *, S):
     key = f"library_{sf:.3f}MHz.json"
     cpath = os.path.join(cache_dir, key)
     comp = pd.read_csv(os.path.join(libdir, "compounds.csv"))
-    sig = hashlib.md5((open(os.path.join(libdir, "compounds.csv")).read() +
-                       open(os.path.join(libdir, "gissmo_spin_systems.txt")).read() +
-                       open(os.path.join(libdir, "other_spin_systems.txt")).read() +
-                       open(os.path.join(libdir, "peaklists.csv")).read() + __version__).encode()).hexdigest()
+    text = ""
+    for fn in ("compounds.csv", "gissmo_spin_systems.txt", "other_spin_systems.txt", "peaklists.csv"):
+        with open(os.path.join(libdir, fn), encoding="utf-8") as fh:
+            text += fh.read()
+    sig = hashlib.md5((text + __version__).encode()).hexdigest()
     if os.path.exists(cpath):
-        d = json.load(open(cpath))
+        with open(cpath, encoding="utf-8") as fh:
+            d = json.load(fh)
         if d.get("sig") == sig:
             return d["compounds"]
     g = parse_gissmo(os.path.join(libdir, "gissmo_spin_systems.txt"))
@@ -581,7 +666,8 @@ def build_library(sf, libdir, cache_dir):
                         nprot=float(nprot), ppm=[float(v) for v in ppm], inten=[float(v) for v in it], group=[int(v) for v in grp],
                         provenance=prov))
     os.makedirs(cache_dir, exist_ok=True)
-    json.dump(dict(sig=sig, compounds=out), open(cpath, "w"))
+    with open(cpath, "w", encoding="utf-8") as fh:
+        json.dump(dict(sig=sig, compounds=out), fh)
     return out
 
 
@@ -726,7 +812,7 @@ class Grid:
 # =============================================================================
 # 5. Fit one spectrum
 # =============================================================================
-def fit_spectrum(ppm_raw, y, sf, lib, log):
+def fit_spectrum(ppm_raw, y, sf, lib, log, *, S):
     """Fit one spectrum. Model:
          y(x) = sum_m a_m * M_m(x; d_m, w_m)  +  sum_u b_u * singlet_u(x)  +  spline(x)
        M_m = simulated multiplet m (library intensities, locked internal geometry)
@@ -734,7 +820,7 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
        d_m = library position + global offset + compound shift D_k + small delta_m
        w_m = linewidth factor (pseudo-Voigt, shared eta)"""
     t0 = time.time()
-    tsp = fit_tsp(ppm_raw, y, sf)
+    tsp = fit_tsp(ppm_raw, y, sf, S=S)
     ppm = ppm_raw - tsp["centre"]
     noise_why = []
     sigma = noise_sigma(ppm, y, noise_why)
@@ -744,11 +830,11 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
     eta = float(np.clip(tsp["eta"], 0.3, 1.0))
     log(f"   {S['REFERENCE']}: area={tsp['area']:.4g}  fwhm={tsp['fwhm_hz']:.2f} Hz  eta={tsp['eta']:.2f}  "
         f"rel.rms={tsp['rel_rms']:.3f}  noise sigma={sigma:.4g}  SNR(TSP)={tsp['height']/sigma:.0f}")
-    ph = estimate_ph(ppm, y, sigma) if S["PH_ESTIMATE"] else dict({k: np.nan for k in PH_COLUMNS}, pH_flag="not_estimated")
+    ph = estimate_ph(ppm, y, sigma, S=S) if S["PH_ESTIMATE"] else dict({k: np.nan for k in PH_COLUMNS}, pH_flag="not_estimated")
     if S["PH_ESTIMATE"]:
         log(f"   pH estimate (histidine, estimate only): {ph['pH_est']:.2f}  H2 {ph['his_H2_ppm']:.4f} ppm -> "
             f"{ph['pH_H2']:.2f}, H4 {ph['his_H4_ppm']:.4f} ppm -> {ph['pH_H4']:.2f}  ({ph['pH_flag']})")
-    his_win = histidine_targets(ph) if S["PH_PLACE_HISTIDINE"] else {}
+    his_win = histidine_targets(ph, S=S) if S["PH_PLACE_HISTIDINE"] else {}
 
     lo, hi = S["FIT_RANGE"]
     mask = (ppm > lo) & (ppm < hi)
@@ -857,7 +943,7 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
                 centre = float((m["p"] * m["it"]).sum() / m["it"].sum() + m["d"])
                 where = (f"left out of the fit: its signal at {centre:.3f} ppm (multiplet {m['j'] + 1}, "
                          f"{m['loc_dom']:.0%} of the fitted signal there)")
-                gone = _contradicted_by(m, mps, m["local_amp"], x, yv, base_now, fw0, sf, sigma, grid.dx, cols)
+                gone = _contradicted_by(m, mps, m["local_amp"], x, yv, base_now, fw0, sf, sigma, grid.dx, cols, S=S)
                 if gone:
                     dropped[k] = f"{where} implies multiplet(s) {','.join(map(str, gone))}, which are not in the spectrum"
                     n += 1
@@ -868,7 +954,7 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
                 if not settled or shift_hz < S["GHOST_SHIFT_TITRATABLE_HZ" if lib[k]["titratable"] else "GHOST_SHIFT_HZ"]:
                     continue
                 empty = [o["j"] + 1 for o in mps if o is not m and (o["nprot"] >= 0.3 or o["nprot"] / nprot >= 0.1)
-                         and _excluded_fraction(o) < 0.5
+                         and _excluded_fraction(o, S=S) < 0.5
                          and m["local_amp"] * cols[id(o)].max() > S["CONTRADICT_MIN_SNR"] * sigma
                          and not (np.isfinite(o["local_amp"])
                                   and o["local_amp"] >= S["CONTRADICT_FRACTION"] * m["local_amp"])]
@@ -931,7 +1017,7 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
         coef = r.x / cs
         return coef, A @ coef, A
 
-    def roi_refine(coef, M, U, fit):
+    def roi_refine(coef, M, U, fit, max_nfev=None):
         am = coef[:nM]
         ua = coef[nM:nM + len(unknown)]
         base_fit = B @ coef[nM + len(unknown):]
@@ -994,7 +1080,7 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
             ntot = nm + nu
             idx_d = list(range(nm)) + list(range(2 * nm, 2 * nm + nu))
             idx_w = list(range(nm, 2 * nm)) + list(range(2 * nm + nu, 2 * nm + 2 * nu))
-            for _ in range(S["ROI_MAX_NFEV"]):
+            for _ in range(S["ROI_MAX_NFEV"] if max_nfev is None else max_nfev):
                 amps = c_[:ntot]
                 J = np.hstack([Dd * amps[None, :], Dw * amps[None, :]]) * ww[:, None]
                 JTJ = J.T @ J
@@ -1201,9 +1287,7 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
     U = unk_columns()
     coef, fit, A = global_solve(M, U)
     # local amplitudes consistent with the final positions (no further movement)
-    keep_nfev = S["ROI_MAX_NFEV"]; S["ROI_MAX_NFEV"] = 0
-    roi_refine(coef, M, U, fit)
-    S["ROI_MAX_NFEV"] = keep_nfev
+    roi_refine(coef, M, U, fit, max_nfev=0)
     log(f"   final chi2/n={chi(fit):.2f}  ({time.time()-t0:.0f}s)")
 
     am = coef[:nM]
@@ -1260,7 +1344,7 @@ def _observed_height(x, yv, base, apex, half, dx):
     return max(float((yv[j0:j1] - base[j0:j1]).max()), 0.0)
 
 
-def _contradicted_by(i, mps, amp, x, yv, base, fw0, sf, sig, dx, cols=None):
+def _contradicted_by(i, mps, amp, x, yv, base, fw0, sf, sig, dx, cols=None, *, S):
     """Multiplets (numbers) of one molecule that `amp` (the amount implied by multiplet i, or the reported value)
     predicts above CONTRADICT_MIN_SNR x noise but that are (almost) absent from the data."""
     out = []
@@ -1286,7 +1370,7 @@ def _n_lines(m):
     return int((m["it"] > 0.03 * m["it"].max()).sum())
 
 
-def _excluded_fraction(m):
+def _excluded_fraction(m, *, S):
     """Fraction of a multiplet's intensity whose lines sit in an ignored region or outside the fitted range."""
     pos = np.asarray(m["p"], float) + float(m["d"])
     it = np.asarray(m["it"], float)
@@ -1297,7 +1381,7 @@ def _excluded_fraction(m):
     return float(it[out].sum() / it.sum()) if it.sum() > 0 else 1.0
 
 
-def grade(res, lib, sf, cf):
+def grade(res, lib, sf, cf, *, S):
     """cf converts a per-proton area to mM in the medium. Per-multiplet quality
     measures come from the local (ROI) fits, where each multiplet has its own
     amplitude, so a library intensity error elsewhere in the molecule cannot
@@ -1310,7 +1394,7 @@ def grade(res, lib, sf, cf):
     for k, c in enumerate(lib):
         a = res["amp"][k]
         mps = [m for m in res["MP"] if m["k"] == k]
-        if mps and all(m["unit_peak"] <= 0 or _excluded_fraction(m) >= 0.9 for m in mps):
+        if mps and all(m["unit_peak"] <= 0 or _excluded_fraction(m, S=S) >= 0.9 for m in mps):
             # every multiplet of this compound lies in an excluded region: nothing to fit
             rows.append(dict(metabolite=c["name"], cls=c["cls"], tier=NOTMEAS, conc_mM=np.nan, se_mM=np.nan,
                              whole_compound_fit_mM=np.nan, method="all multiplets inside ignored regions", reporter_ppm="",
@@ -1330,7 +1414,7 @@ def grade(res, lib, sf, cf):
             ok_amp = np.isfinite(la) and la > 0
             # the amount this multiplet's own local fit implies must not predict the molecule's other multiplets
             # clearly above the noise where the data show nothing; if it does, the signal belongs to something else
-            gone = _contradicted_by(m, mps, la, xg, yv, base, fw0, sf, sig, dx) \
+            gone = _contradicted_by(m, mps, la, xg, yv, base, fw0, sf, sig, dx, S=S) \
                 if ok_amp and h / sig >= S["LOQ_SNR"] else []
             if gone:
                 self_contra[id(m)] = gone
@@ -1439,7 +1523,7 @@ def grade(res, lib, sf, cf):
             method = "fitted value exceeds what the data allow at another multiplet -> data upper bound"
         elif clean and (not np.isfinite(cross) or cross <= S["MAX_REPORTER_RATIO"]) and \
                 (len(clean) >= 2 or clean[0]["nprot"] / c["nprot"] >= S["SINGLE_REPORTER_MIN_SHARE"]) and \
-                not (why_not := _reporter_doubt(clean, mps, amp_use, self_contra, c, sig, cf)):
+                not (why_not := _reporter_doubt(clean, mps, amp_use, self_contra, c, sig, cf, S=S)):
             tier = "Quantified"
         elif use:
             tier = "Overlapped (semi-quantitative)"
@@ -1496,12 +1580,12 @@ def _main_partner(res, k, ppm):
     return who
 
 
-def _reporter_doubt(clean, mps, amp_use, self_contra, c, sig, cf):
+def _reporter_doubt(clean, mps, amp_use, self_contra, c, sig, cf, *, S):
     """Why reporter value(s) that pass the per-multiplet tests should still not be graded Quantified (or ""):
     the molecule's other multiplets (above LOQ, outside ignored regions, any dominance) give a different value,
     or a lone singlet reporter is not confirmed by another multiplet."""
     def measurable(m):
-        return (m["unit_peak"] > 0 and _excluded_fraction(m) < 0.5
+        return (m["unit_peak"] > 0 and _excluded_fraction(m, S=S) < 0.5
                 and (m["nprot"] >= 0.3 or m["nprot"] / c["nprot"] >= 0.1))
     rest = [m for m in mps if all(m is not u for u in clean) and measurable(m)]
     others = [m for m in rest if np.isfinite(m["local_amp"]) and m["local_amp"] > 0 and id(m) not in self_contra
@@ -1562,7 +1646,7 @@ def gapped(x, *ys, dx=None):
     return (xo,) + tuple(np.insert(np.asarray(y, float), cut, np.nan) for y in ys)
 
 
-def overlay_pdf(res, lib, grades, sample, path):
+def overlay_pdf(res, lib, grades, sample, path, *, S):
     x = res["grid"].x
     names = [c["name"] for c in lib]
     tiers = dict(zip(grades.metabolite, grades.tier))
@@ -1775,19 +1859,19 @@ def process_sample(job):
     to <out>/_per_sample as they are produced, so a crash or a stop loses nothing: the
     next run re-uses them and only fits what is missing."""
     smp, d, libdir, out, settings = job
-    S.update(settings)
+    S = Settings(settings)
     per = os.path.join(out, "_per_sample")
     done = [os.path.join(per, f"{smp}_{k}.csv") for k in ("grades", "peaks", "obs", "qc")]
     note = []
     if S["RESUME"] and all(os.path.exists(f) for f in done):
-        why = _reuse_problem(per, smp, d)
+        why = _reuse_problem(per, smp, d, S=S)
         if why is None:
             gr, pk, ob, qdf = (pd.read_csv(f) for f in done)
             return gr, pk, ob, qdf.iloc[0].to_dict(), None, [f"Sample {smp}: re-used earlier result (same run, "
                                                              f"same settings)"]
         note = [f"Sample {smp}: its earlier result cannot be used ({why}); fitting it again"]
     try:
-        gr, pk, ob, q, res, lines = _fit_one(smp, d, libdir, out)
+        gr, pk, ob, q, res, lines = _fit_one(smp, d, libdir, out, S=S)
         return gr, pk, ob, q, res, note + lines
     except Exception as exc:
         import traceback
@@ -1814,11 +1898,11 @@ def library_hash(libdir):
     return h.hexdigest()
 
 
-def _source_desc(smp, dilution):
+def _source_desc(smp, dilution, *, S):
     """Everything a sample's saved result depends on: the spectrum and its processing, the run it belongs to,
     the MANC-Q version, the library, the reference concentration, its dilution and every fitting and grading
     setting. A saved result is only re-used if all of these are unchanged."""
-    d, pn = sample_source(smp)
+    d, pn = sample_source(smp, S=S)
     u = (S.get("PROCESSING_USED") or {}).get(smp)
     d = os.path.normcase(os.path.abspath(d))
     out = os.path.normcase(os.path.abspath(S["OUT_DIR"])) if S.get("OUT_DIR") else None
@@ -1835,19 +1919,19 @@ _SOURCE_WHY = dict(spectrum="a different spectrum", procno="a different procno",
                    library="the compound library has changed", dilution="the dilution has changed")
 
 
-def _reuse_problem(per, smp, dilution):
+def _reuse_problem(per, smp, dilution, *, S):
     """None if the saved result of `smp` can be re-used, otherwise the reason (in words) why not."""
     f = os.path.join(per, f"{smp}_source.json")
     if not os.path.exists(f):
         return "no record of how it was made"
     try:
-        with open(f) as fh:
+        with open(f, encoding="utf-8") as fh:
             old = json.load(fh)
     except ValueError:
         old = None
     if not isinstance(old, dict) or "run_id" not in old:
         return "made by MANC-Q 1.8.0 or earlier"
-    new = _source_desc(smp, dilution)
+    new = _source_desc(smp, dilution, S=S)
     why = [_SOURCE_WHY.get(k, k) for k in new if k != "settings" and old.get(k) != new[k]]
     so, sn = old.get("settings") or {}, new["settings"]
     changed = sorted(k for k in set(so) | set(sn) if so.get(k) != sn.get(k))
@@ -1883,7 +1967,7 @@ def previous_run(out):
     """What run_settings.json says about the run in `out`: dict(run_id, samples, complete), or None."""
     f = os.path.join(out, "_per_sample", "run_settings.json")
     try:
-        with open(f) as fh:
+        with open(f, encoding="utf-8") as fh:
             rs = json.load(fh)
     except (OSError, ValueError):
         return None
@@ -1917,7 +2001,7 @@ def clear_results(out, keep=()):
             shutil.rmtree(p)
 
 
-def sample_source(smp):
+def sample_source(smp, *, S):
     """(EXPNO folder, procno) for a sample: SAMPLE_DIRS if given, else DATA_DIR/<sample>, PROCNO."""
     sd = S.get("SAMPLE_DIRS") or {}
     if smp in sd:
@@ -1925,20 +2009,20 @@ def sample_source(smp):
     return os.path.join(S["DATA_DIR"], smp), S["PROCNO"]
 
 
-def _raw_folder(smp, expdir):
+def _raw_folder(smp, expdir, *, S):
     """The user's own EXPNO folder of a sample (with its acqus), also when MANC-Q processed it into _processed."""
     raw = os.path.join(S["DATA_DIR"], smp) if S.get("DATA_DIR") else expdir
     return raw if os.path.exists(os.path.join(raw, "acqus")) else expdir
 
 
-def _metabolite_fwhm(res, sf):
+def _metabolite_fwhm(res, sf, *, S):
     """Median fitted linewidth (Hz) of the metabolite multiplets clearly above the noise."""
     w = [res["fw0"] * m["wf"] * sf for m in res["MP"] if m.get("loc_h", 0) > 10 * S["LOQ_SNR"] * res["sigma"]
          and m.get("loc_dom", 0) >= S["Q_MIN_DOMINANCE"]]
     return round(float(np.median(w)), 3) if w else np.nan
 
 
-def qc_flags(Q):
+def qc_flags(Q, *, S):
     """Add qc_flag (ok / check / poor) and qc_reason (in words) to the per-sample QC table."""
     Q = Q.copy()
     flags, reasons = [], []
@@ -1984,13 +2068,13 @@ def qc_flags(Q):
     return Q
 
 
-def detect_pluronic(ppm, y):
+def detect_pluronic(ppm, y, *, S):
     """True if the spectrum has the tall PEO line of Pluronic F-68 near 3.71 ppm."""
     m = (ppm > 3.69) & (ppm < 3.74)
     return bool(m.any() and y[m].max() > S["PEO_DETECT_SNR"] * noise_sigma(ppm, y))
 
 
-def _fit_one(smp, d, libdir, out):
+def _fit_one(smp, d, libdir, out, *, S):
     lines = []
     log = lambda msg: lines.append(msg)
     per = os.path.join(out, "_per_sample")
@@ -2001,16 +2085,16 @@ def _fit_one(smp, d, libdir, out):
         os.replace(mf, aside)
         lines.append(f"   NOTE: sample {smp} was fitted again, so the manual adjustments made on its earlier fit "
                      f"no longer apply; they were moved to _per_sample/{os.path.basename(aside)}")
-    expdir, procno = sample_source(smp)
-    ppm, y, sf, title = read_spectrum(expdir, procno)
-    pluronic = detect_pluronic(ppm, y) if S["PLURONIC"] == "auto" else S["PLURONIC"] == "yes"
-    lib = prepare_library(build_library(sf, libdir, os.path.join(out, "_cache")), sf, pluronic)
+    expdir, procno = sample_source(smp, S=S)
+    ppm, y, sf, title = read_spectrum(expdir, procno, S=S)
+    pluronic = detect_pluronic(ppm, y, S=S) if S["PLURONIC"] == "auto" else S["PLURONIC"] == "yes"
+    lib = prepare_library(build_library(sf, libdir, os.path.join(out, "_cache"), S=S), sf, pluronic)
     log(f"Sample {smp}  (title: {title}, dilution x{d}, {sf:.2f} MHz"
         f"{', Pluronic terms added' if pluronic else ''})")
     t0 = time.time()
-    res = fit_spectrum(ppm, y, sf, lib, log)
+    res = fit_spectrum(ppm, y, sf, lib, log, S=S)
     cf = S["TSP_MM_IN_TUBE"] * S["TSP_PROTONS"] / res["tsp"]["area"] * d
-    gr, pk = grade(res, lib, sf, cf)
+    gr, pk = grade(res, lib, sf, cf, S=S)
     gr.insert(0, "sample", smp); pk.insert(0, "sample", smp)
     ob = observed_peaks(res, lib, smp, sf)
     sig_area = max((res["yv"] - res["base_fit"]).clip(min=0).sum(), 1e-9)
@@ -2024,12 +2108,12 @@ def _fit_one(smp, d, libdir, out):
              abs_residual_fraction=np.abs(res["yv"] - res["fit"]).sum() / sig_area,
              fit_time_s=round(time.time() - t0, 1), **res["ph"],
              TSP_phase_deg=round(res["tsp"].get("phase_deg", np.nan), 2), noise_method=res["noise_method"],
-             metabolite_fwhm_Hz=_metabolite_fwhm(res, sf),
-             **read_acquisition(_raw_folder(smp, expdir)),
+             metabolite_fwhm_Hz=_metabolite_fwhm(res, sf, S=S),
+             **read_acquisition(_raw_folder(smp, expdir, S=S)),
              processing=((S.get("PROCESSING_USED") or {}).get(smp) or {}).get(
                  "description", f"as processed in TopSpin (pdata/{procno})"))
     if S["OVERLAYS"]:
-        overlay_pdf(res, lib, gr, smp, os.path.join(out, f"overlay_sample_{smp}.pdf"))
+        overlay_pdf(res, lib, gr, smp, os.path.join(out, f"overlay_sample_{smp}.pdf"), S=S)
     x = res["grid"].x
     cols = {"ppm": x, "observed": res["yv"], "simulated_total": res["fit"], "baseline": res["base_fit"]}
     for k, c in enumerate(lib):
@@ -2042,16 +2126,17 @@ def _fit_one(smp, d, libdir, out):
                         x=res["grid"].x.astype(np.float32), yv=res["yv"].astype(np.float32),
                         fit=res["fit"].astype(np.float32), base=res["base_fit"].astype(np.float32),
                         dx=res["grid"].dx, sf=sf, amp=res["amp"], se=res["se"], pluronic=pluronic, eta=res["eta"],
-                        mp_json=np.array(json.dumps([{k: (v.tolist() if isinstance(v, np.ndarray) else v)
-                                                      for k, v in m.items()} for m in res["MP"]],
-                                                     default=_json_default)))
+                        mp_json=np.array(json.dumps([dict({k: (v.tolist() if isinstance(v, np.ndarray) else v)
+                                                           for k, v in m.items()}, name=lib[m["k"]]["name"])
+                                                      for m in res["MP"]], default=_json_default)))
     gr.to_csv(os.path.join(per, f"{smp}_grades.csv"), index=False)
     pk.to_csv(os.path.join(per, f"{smp}_peaks.csv"), index=False)
     ob.to_csv(os.path.join(per, f"{smp}_obs.csv"), index=False)
     pd.DataFrame([q]).to_csv(os.path.join(per, f"{smp}_qc.csv"), index=False)
-    open(os.path.join(per, f"{smp}_log.txt"), "w").write("\n".join(lines))
-    with open(os.path.join(per, f"{smp}_source.json"), "w") as fh:
-        json.dump(_source_desc(smp, d), fh, sort_keys=True, indent=1)
+    with open(os.path.join(per, f"{smp}_log.txt"), "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+    with open(os.path.join(per, f"{smp}_source.json"), "w", encoding="utf-8") as fh:
+        json.dump(_source_desc(smp, d, S=S), fh, sort_keys=True, indent=1)
     return gr, pk, ob, q, None, lines
 
 
@@ -2087,7 +2172,8 @@ def read_manual(out, smp):
     f = manual_file(out, smp)
     if not os.path.exists(f):
         return {}
-    return json.load(open(f)).get("edits", {})
+    with open(f, encoding="utf-8") as fh:
+        return json.load(fh).get("edits", {})
 
 
 def apply_manual(out, gr):
@@ -2120,7 +2206,7 @@ def apply_manual(out, gr):
     return gr
 
 
-def ph_readme():
+def ph_readme(*, S):
     """The paragraph on the pH estimate for the results README."""
     return (f"pH_est in the QC sheet is an ESTIMATE of the pH in the NMR tube when the spectrum was recorded (not in the "
             f"culture), from the positions of the histidine imidazole singlets H2 (looked for in "
@@ -2138,7 +2224,7 @@ def ph_readme():
                if S['PH_PLACE_HISTIDINE'] else ""))
 
 
-def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
+def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log, *, S):
     """Build every table and figure from the per-sample results (also used by regrade.py and after manual
     adjustments). Manual adjustments saved in _per_sample are applied here."""
     grades = [apply_manual(out, g) for g in grades]
@@ -2159,7 +2245,7 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         G = G.drop(columns=["auto_tier", "auto_conc_mM", "manual_note"], errors="ignore")
     P = pd.concat(peaks, ignore_index=True)
     O = pd.concat(obs, ignore_index=True)
-    Q = qc_flags(pd.DataFrame(qc))
+    Q = qc_flags(pd.DataFrame(qc), S=S)
 
     # ---------- summary tables ----------
     G = G[~G.metabolite.str.startswith("Pluronic")].copy()
@@ -2224,7 +2310,7 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         "Every multiplet of every metabolite in every sample: fitted centre, range, line positions and relative intensities, protons, linewidth, shift from library, dominance, misfit, concentration from that multiplet alone, and whether it was used as a reporter.",
         "Peaks picked in the observed spectrum (>10 x noise) with the fitted contributors at each apex (the peak assignment list).",
         "Per-sample referencing, linewidth, noise, fit quality, fraction of signal explained, how the spectrum was processed, the estimated pH, the acquisition parameters from acqus (D1, AQ, NS, RG, PULPROG, TE, P1), the residual phase error measured on TSP (TSP_phase_deg) and the median metabolite linewidth. qc_flag sums these up: ok, check or poor, with the reasons in qc_reason (TSP linewidth, TSP much broader than the metabolites, chi2, signal explained, unassigned singlets, phase error, histidine pH flag, D1 + AQ under " + f"{S['QC_MIN_RELAXATION_S']:g}" + " s, noise estimate).",
-        ph_readme() if "pH_est" in Q else "Not estimated: these results were fitted by a MANC-Q version before 1.4.",
+        ph_readme(S=S) if "pH_est" in Q else "Not estimated: these results were fitted by a MANC-Q version before 1.4.",
         "Every manual adjustment: sample, metabolite, automatic and manual value, shift and linewidth used, note, user and time. Empty if nothing was adjusted.",
         "Chemical shift assignment table for publication: every metabolite with a value in the tiers SHIFT_TABLE_TIERS in at least SHIFT_TABLE_MIN_FRACTION of the samples (default Quantified, Overlapped or Manually adjusted in 25 %), its 1H shifts (fitted multiplet centres, median over those samples), * = peaks used to quantify it, ** = used but shared with another metabolite (semi-quantitative), the number of samples and the reference spectrum. The same table, formatted for a supplement, is in chemical_shift_assignments.xlsx.",
         json.dumps({k: v for k, v in S.items() if k != "OVERLAY_REGIONS"})]))
@@ -2281,7 +2367,7 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
     log(summ.best_tier.value_counts().to_string())
     log(Q.round(3).T.to_string())
     if "pH_est" in Q:
-        log("\npH estimate: " + ph_readme())
+        log("\npH estimate: " + ph_readme(S=S))
     log(f"\nWrote {xl}")
     return G
 
@@ -2300,8 +2386,7 @@ def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, progress=No
         raise ValueError("the reference (TSP/DSS) concentration in the tube, in mM, is required")
     say = progress or (lambda *a, **k: None)
     stop = cancel or (lambda: False)
-    S.clear(); S.update(_copy.deepcopy(DEFAULT_SETTINGS))   # each run starts from the defaults
-    S.update(settings)
+    S = Settings(settings)                     # this run's own settings: the defaults with these changes
     S.update(DATA_DIR=os.path.abspath(data_dir) if data_dir else None, OUT_DIR=os.path.abspath(out_dir),
              TSP_MM_IN_TUBE=float(ref_mm), DEFAULT_DILUTION=float(dilution), DILUTION_FILE=dilution_file)
     if S["PLURONIC"] == "ignore":
@@ -2335,155 +2420,151 @@ def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, progress=No
     if not resumed:
         S["RUN_ID"] = f"{time.strftime('%Y%m%d-%H%M%S')}-{os.urandom(4).hex()}"
     os.makedirs(out, exist_ok=True)
-    logf = open(os.path.join(out, "run_log.txt"), "w")
+    with open(os.path.join(out, "run_log.txt"), "w", encoding="utf-8") as logf:
 
-    def log(msg):
-        print(msg, flush=True); logf.write(msg + "\n"); logf.flush()
+        def log(msg):
+            print(msg, flush=True); logf.write(msg + "\n"); logf.flush()
 
-    if cleared:
-        log("Overwrite: the results of the earlier run in this folder were deleted.")
-    elif existing == "resume" and not resumed:
-        log("Nothing to carry on in this folder (no stopped run of MANC-Q 1.8.1 or later): every spectrum is fitted.")
-    libdir = S["LIBRARY_DIR"] or os.path.join(HERE, "library")
-    S["LIBRARY_HASH"] = library_hash(libdir)
-    dil = read_dilutions(S["DILUTION_FILE"], samples, log)
-    # spectra MANC-Q processes itself, into <out>/_processed/<sample> (the raw data are never changed): raw FIDs
-    # (automatic phasing unless PROCESSING says otherwise) and TopSpin spectra the user adjusted (PROCESSING)
-    sd = dict(S.get("SAMPLE_DIRS") or {})
-    for smp in samples:
-        if smp not in sd and not os.path.isdir(os.path.join(S["DATA_DIR"], smp)):
-            logf.close()
-            raise FileNotFoundError(f"EXPNO {smp} is not in {S['DATA_DIR']}")
-    req = {str(k): dict(v) for k, v in (S.get("PROCESSING") or {}).items()}
-    used = {}
-    from . import fidproc
-    todo = []
-    for smp in samples:
-        if smp in sd:
-            continue
-        ed = os.path.join(S["DATA_DIR"], smp)
-        p = req.get(smp)
-        if p is None and S["FID_MODE"] != "never" and fidproc.has_fid(ed) and \
-                (S["FID_MODE"] == "all" or not fidproc.has_processed(ed, S["PROCNO"])):
-            p = dict(source="fid", lb=S["FID_LB"], ph0=None, ph1=None, baseline=False)
-        if p is not None:
-            todo.append((smp, ed, p))
-    for k_, (smp, ed, p) in enumerate(todo, 1):
-        if stop():
-            log("Cancelled while processing spectra: nothing was fitted.")
-            say("cancelled", None, dict(not_fitted=list(samples)))
-            logf.close()
-            return None
-        say("fid_processing", smp, dict(k=k_, n=len(todo), source=p.get("source", "fid")))
-        p = dict(source=p.get("source") or "fid", lb=_num(p.get("lb")), ph0=_num(p.get("ph0")),
-                 ph1=_num(p.get("ph1")), baseline=_flag(p.get("baseline")))
-        r = fidproc.process(ed, S["PROCNO"], **p)
-        dest = os.path.join(out, "_processed", smp)
-        fidproc.write_processed(r, dest, title=f"EXPNO {smp} (processed by MANC-Q)")
-        open(os.path.join(dest, "processing.txt"), "w").write(
-            f"Processed from {ed} by MANC-Q {__version__}: {r['description']}\n")
-        sd[smp] = (dest, 1)
-        used[smp] = dict(requested=p, source=p["source"], lb=round(r["lb"], 4), ph0=round(r["ph0"], 3),
-                         ph1=round(r["ph1"], 3), baseline=r["baseline"], automatic_phase=bool(r.get("auto")),
-                         description=r["description"])
-        log(f"EXPNO {smp}: {r['description']}; check its overlay")
-    S["SAMPLE_DIRS"] = sd
-    S["PROCESSING_USED"] = used
-    # the processing actually used, in the form --processing reads (blank phase = automatic)
-    rows = [dict(sample=s_, source=u["source"], lb=u["lb"],
-                 ph0="" if u["requested"]["ph0"] is None else u["ph0"],
-                 ph1="" if u["requested"]["ph0"] is None else u["ph1"],
-                 baseline=u["baseline"], description=u["description"]) for s_, u in used.items()]
-    if rows:
-        pd.DataFrame(rows).to_csv(os.path.join(out, "processing_used.csv"), index=False)
-    os.makedirs(os.path.join(out, "_per_sample"), exist_ok=True)
+        if cleared:
+            log("Overwrite: the results of the earlier run in this folder were deleted.")
+        elif existing == "resume" and not resumed:
+            log("Nothing to carry on in this folder (no stopped run of MANC-Q 1.8.1 or later): every spectrum is fitted.")
+        libdir = S["LIBRARY_DIR"] or os.path.join(HERE, "library")
+        S["LIBRARY_HASH"] = library_hash(libdir)
+        dil = read_dilutions(S["DILUTION_FILE"], samples, log, S=S)
+        # spectra MANC-Q processes itself, into <out>/_processed/<sample> (the raw data are never changed): raw FIDs
+        # (automatic phasing unless PROCESSING says otherwise) and TopSpin spectra the user adjusted (PROCESSING)
+        sd = dict(S.get("SAMPLE_DIRS") or {})
+        for smp in samples:
+            if smp not in sd and not os.path.isdir(os.path.join(S["DATA_DIR"], smp)):
+                raise FileNotFoundError(f"EXPNO {smp} is not in {S['DATA_DIR']}")
+        req = {str(k): dict(v) for k, v in (S.get("PROCESSING") or {}).items()}
+        used = {}
+        from . import fidproc
+        todo = []
+        for smp in samples:
+            if smp in sd:
+                continue
+            ed = os.path.join(S["DATA_DIR"], smp)
+            p = req.get(smp)
+            if p is None and S["FID_MODE"] != "never" and fidproc.has_fid(ed) and \
+                    (S["FID_MODE"] == "all" or not fidproc.has_processed(ed, S["PROCNO"])):
+                p = dict(source="fid", lb=S["FID_LB"], ph0=None, ph1=None, baseline=False)
+            if p is not None:
+                todo.append((smp, ed, p))
+        for k_, (smp, ed, p) in enumerate(todo, 1):
+            if stop():
+                log("Cancelled while processing spectra: nothing was fitted.")
+                say("cancelled", None, dict(not_fitted=list(samples)))
+                return None
+            say("fid_processing", smp, dict(k=k_, n=len(todo), source=p.get("source", "fid")))
+            p = dict(source=p.get("source") or "fid", lb=_num(p.get("lb")), ph0=_num(p.get("ph0")),
+                     ph1=_num(p.get("ph1")), baseline=_flag(p.get("baseline")))
+            r = fidproc.process(ed, S["PROCNO"], **p)
+            dest = os.path.join(out, "_processed", smp)
+            fidproc.write_processed(r, dest, title=f"EXPNO {smp} (processed by MANC-Q)")
+            with open(os.path.join(dest, "processing.txt"), "w", encoding="utf-8") as fh:
+                fh.write(
+                f"Processed from {ed} by MANC-Q {__version__}: {r['description']}\n")
+            sd[smp] = (dest, 1)
+            used[smp] = dict(requested=p, source=p["source"], lb=round(r["lb"], 4), ph0=round(r["ph0"], 3),
+                             ph1=round(r["ph1"], 3), baseline=r["baseline"], automatic_phase=bool(r.get("auto")),
+                             description=r["description"])
+            log(f"EXPNO {smp}: {r['description']}; check its overlay")
+        S["SAMPLE_DIRS"] = sd
+        S["PROCESSING_USED"] = used
+        # the processing actually used, in the form --processing reads (blank phase = automatic)
+        rows = [dict(sample=s_, source=u["source"], lb=u["lb"],
+                     ph0="" if u["requested"]["ph0"] is None else u["ph0"],
+                     ph1="" if u["requested"]["ph0"] is None else u["ph1"],
+                     baseline=u["baseline"], description=u["description"]) for s_, u in used.items()]
+        if rows:
+            pd.DataFrame(rows).to_csv(os.path.join(out, "processing_used.csv"), index=False)
+        os.makedirs(os.path.join(out, "_per_sample"), exist_ok=True)
 
-    def save_run_settings(complete):
-        with open(os.path.join(out, "_per_sample", "run_settings.json"), "w") as fh:
-            json.dump(dict({k: v for k, v in S.items() if k != "OVERLAY_REGIONS"}, MANCQ_VERSION=__version__,
-                           RUN_SAMPLES=list(samples), RUN_COMPLETE=complete), fh, indent=1, default=str)
+        def save_run_settings(complete):
+            S.save(os.path.join(out, "_per_sample", "run_settings.json"), RUN_SAMPLES=list(samples),
+                   RUN_COMPLETE=complete)
 
-    save_run_settings(False)
-    log(f"MANC-Q {__version__}   {time.strftime('%Y-%m-%d %H:%M')}\nData: {S['DATA_DIR']}\n"
-        f"Samples ({len(samples)}): {samples}\nReference: {S['REFERENCE']} {S['TSP_MM_IN_TUBE']} mM in tube\n"
-        f"Ignored regions (ppm): {', '.join(f'{a:.2f}-{b:.2f}' for a, b in S['EXCLUDE'])}\n"
-        f"Pluronic F-68: {S['PLURONIC']}")
-    d0, p0 = sample_source(samples[0])
-    _, _, sf, _ = read_spectrum(d0, p0)
-    log(f"Library at {sf:.3f} MHz ...")
-    lib = prepare_library(build_library(sf, libdir, os.path.join(out, "_cache")), sf, S["PLURONIC"] in ("auto", "yes"))
-    log(f"  {sum(c['source']=='GISSMO' for c in lib)} GISSMO spin systems, {sum(c['source']=='SPIN' for c in lib)} other spin systems, "
-        f"{sum(c['source']=='CASMDB' for c in lib)} peak lists, {sum(c['source']=='polymer' for c in lib)} polymer terms")
-    nw = S["N_WORKERS"] or max(1, min(len(samples), (os.cpu_count() or 2) - 1))
-    nw = max(1, min(nw, len(samples)))
-    jobs = {smp: (smp, dil.get(smp, S["DEFAULT_DILUTION"]), libdir, out, dict(S)) for smp in samples}
-    log(f"Fitting {len(samples)} spectra with {nw} worker(s); a few minutes per spectrum ...")
-    say("run_started", None, dict(n=len(samples), workers=nw, sf=sf))
-    results, cancelled = {}, []
+        save_run_settings(False)
+        log(f"MANC-Q {__version__}   {time.strftime('%Y-%m-%d %H:%M')}\nData: {S['DATA_DIR']}\n"
+            f"Samples ({len(samples)}): {samples}\nReference: {S['REFERENCE']} {S['TSP_MM_IN_TUBE']} mM in tube\n"
+            f"Ignored regions (ppm): {', '.join(f'{a:.2f}-{b:.2f}' for a, b in S['EXCLUDE'])}\n"
+            f"Pluronic F-68: {S['PLURONIC']}")
+        d0, p0 = sample_source(samples[0], S=S)
+        _, _, sf, _ = read_spectrum(d0, p0, S=S)
+        log(f"Library at {sf:.3f} MHz ...")
+        lib = prepare_library(build_library(sf, libdir, os.path.join(out, "_cache"), S=S), sf, S["PLURONIC"] in ("auto", "yes"))
+        log(f"  {sum(c['source']=='GISSMO' for c in lib)} GISSMO spin systems, {sum(c['source']=='SPIN' for c in lib)} other spin systems, "
+            f"{sum(c['source']=='CASMDB' for c in lib)} peak lists, {sum(c['source']=='polymer' for c in lib)} polymer terms")
+        nw = S["N_WORKERS"] or max(1, min(len(samples), (os.cpu_count() or 2) - 1))
+        nw = max(1, min(nw, len(samples)))
+        jobs = {smp: (smp, dil.get(smp, S["DEFAULT_DILUTION"]), libdir, out, dict(S)) for smp in samples}
+        log(f"Fitting {len(samples)} spectra with {nw} worker(s); a few minutes per spectrum ...")
+        say("run_started", None, dict(n=len(samples), workers=nw, sf=sf))
+        results, cancelled = {}, []
 
-    def finished(smp, output, t0):
-        gr, pk, ob, q, res, lines = output
-        for ln in lines:
-            log(ln)
-        results[smp] = output
-        if gr is None:
-            say("sample_failed", smp, dict(error=q.get("error", "unknown error"), seconds=time.time() - t0))
-        else:
-            say("sample_done", smp, dict(seconds=time.time() - t0, n_quantified=int((gr.tier == "Quantified").sum()),
-                                         explained=float(q.get("signal_explained_by_library", np.nan)),
-                                         reused=any("re-used" in ln for ln in lines)))
+        def finished(smp, output, t0):
+            gr, pk, ob, q, res, lines = output
+            for ln in lines:
+                log(ln)
+            results[smp] = output
+            if gr is None:
+                say("sample_failed", smp, dict(error=q.get("error", "unknown error"), seconds=time.time() - t0))
+            else:
+                say("sample_done", smp, dict(seconds=time.time() - t0, n_quantified=int((gr.tier == "Quantified").sum()),
+                                             explained=float(q.get("signal_explained_by_library", np.nan)),
+                                             reused=any("re-used" in ln for ln in lines)))
 
-    queue = list(samples)
-    # Spectra are fitted in worker processes with single-threaded linear algebra. Multi-threaded BLAS
-    # gives tiny run-to-run rounding differences that can flip a grid-search choice; with one thread per worker the
-    # results are identical every time, from the command line, the GUI or Python.
-    for var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS",
-                "NUMEXPR_NUM_THREADS"):
-        os.environ[var] = "1"
-    from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
-    import multiprocessing
-    # "spawn" everywhere: the Windows behaviour, and safe when called from a GUI
-    with ProcessPoolExecutor(max_workers=nw, mp_context=multiprocessing.get_context("spawn")) as ex:
-        running = {}
-        while queue or running:
-            while queue and len(running) < nw and not stop():
-                smp = queue.pop(0)
-                say("sample_started", smp, {})
-                running[ex.submit(process_sample, jobs[smp])] = (smp, time.time())
-            if stop() and queue:
-                cancelled, queue = queue, []
-            if not running:
-                break
-            done, _ = wait(list(running), timeout=1.0, return_when=FIRST_COMPLETED)
-            for fut in done:
-                smp, t0 = running.pop(fut)
-                try:
-                    output = fut.result()
-                except Exception as exc:          # worker crashed
-                    output = (None, None, None, dict(sample=smp, error=f"{type(exc).__name__}: {exc}"), None,
-                              [f"Sample {smp} FAILED: {exc}"])
-                finished(smp, output, t0)
-    if cancelled:
-        log(f"\nCancelled: {len(cancelled)} spectra not fitted: {cancelled}")
-        say("cancelled", None, dict(not_fitted=cancelled))
-    grades, peaks, obs, qc, failed = [], [], [], [], []
-    for smp in samples:
-        if smp not in results:
-            continue
-        gr, pk, ob, q, res, lines = results[smp]
-        if gr is None:
-            failed.append(smp); qc.append(q); continue
-        grades.append(gr); peaks.append(pk); obs.append(ob); qc.append(q)
-    if failed:
-        log(f"\n*** {len(failed)} spectra failed and are not in the tables: {failed}")
-    if not grades:
-        logf.close()
-        say("finished", None, dict(ok=False, failed=failed, cancelled=cancelled))
-        raise RuntimeError("no spectrum could be fitted; see run_log.txt")
-    say("aggregating", None, {})
-    done_samples = [s_ for s_ in samples if s_ in results and results[s_][0] is not None]
-    G = aggregate_outputs(out, grades, peaks, obs, qc, lib, done_samples, log)
-    save_run_settings(not cancelled and not failed)
-    logf.close()
-    say("finished", None, dict(ok=True, failed=failed, cancelled=cancelled, out=out))
-    return G
+        queue = list(samples)
+        # Spectra are fitted in worker processes with single-threaded linear algebra. Multi-threaded BLAS
+        # gives tiny run-to-run rounding differences that can flip a grid-search choice; with one thread per worker the
+        # results are identical every time, from the command line, the GUI or Python.
+        for var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS",
+                    "NUMEXPR_NUM_THREADS"):
+            os.environ[var] = "1"
+        from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
+        import multiprocessing
+        # "spawn" everywhere: the Windows behaviour, and safe when called from a GUI
+        with ProcessPoolExecutor(max_workers=nw, mp_context=multiprocessing.get_context("spawn")) as ex:
+            running = {}
+            while queue or running:
+                while queue and len(running) < nw and not stop():
+                    smp = queue.pop(0)
+                    say("sample_started", smp, {})
+                    running[ex.submit(process_sample, jobs[smp])] = (smp, time.time())
+                if stop() and queue:
+                    cancelled, queue = queue, []
+                if not running:
+                    break
+                done, _ = wait(list(running), timeout=1.0, return_when=FIRST_COMPLETED)
+                for fut in done:
+                    smp, t0 = running.pop(fut)
+                    try:
+                        output = fut.result()
+                    except Exception as exc:          # worker crashed
+                        output = (None, None, None, dict(sample=smp, error=f"{type(exc).__name__}: {exc}"), None,
+                                  [f"Sample {smp} FAILED: {exc}"])
+                    finished(smp, output, t0)
+        if cancelled:
+            log(f"\nCancelled: {len(cancelled)} spectra not fitted: {cancelled}")
+            say("cancelled", None, dict(not_fitted=cancelled))
+        grades, peaks, obs, qc, failed = [], [], [], [], []
+        for smp in samples:
+            if smp not in results:
+                continue
+            gr, pk, ob, q, res, lines = results[smp]
+            if gr is None:
+                failed.append(smp); qc.append(q); continue
+            grades.append(gr); peaks.append(pk); obs.append(ob); qc.append(q)
+        if failed:
+            log(f"\n*** {len(failed)} spectra failed and are not in the tables: {failed}")
+        if not grades:
+            say("finished", None, dict(ok=False, failed=failed, cancelled=cancelled))
+            raise RuntimeError("no spectrum could be fitted; see run_log.txt")
+        say("aggregating", None, {})
+        done_samples = [s_ for s_ in samples if s_ in results and results[s_][0] is not None]
+        G = aggregate_outputs(out, grades, peaks, obs, qc, lib, done_samples, log, S=S)
+        save_run_settings(not cancelled and not failed)
+        say("finished", None, dict(ok=True, failed=failed, cancelled=cancelled, out=out))
+        return G

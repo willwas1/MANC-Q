@@ -68,7 +68,8 @@ def main():
     from PIL import Image
     app = QGuiApplication.instance() or QGuiApplication(sys.argv[:1])
     os.makedirs(ASSETS, exist_ok=True)
-    open(os.path.join(ASSETS, "mancq_logo.svg"), "w").write(svg())
+    with open(os.path.join(ASSETS, "mancq_logo.svg"), "w", encoding="utf-8") as fh:
+        fh.write(svg())
     pngs = {}
     for px in SIZES:
         f = os.path.join(ASSETS, f"mancq_logo_{px}.png")

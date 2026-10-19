@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget, Q
                                QMenu)
 
 from mancq import engine as q
+DEFAULTS = q.Settings()        # engine defaults, for reading and checking spectra outside a run (never changed)
 from mancq import fidproc as fp
 from mancq import results as rs
 from mancq import twod
@@ -120,7 +121,8 @@ def open_path(path):
 
 def load_prefs():
     try:
-        return json.load(open(PREFS_FILE, encoding="utf-8"))
+        with open(PREFS_FILE, encoding="utf-8") as fh:
+            return json.load(fh)
     except Exception:
         return {}
 
@@ -128,7 +130,8 @@ def load_prefs():
 def save_prefs(d):
     try:
         os.makedirs(os.path.dirname(PREFS_FILE), exist_ok=True)
-        json.dump(d, open(PREFS_FILE, "w", encoding="utf-8"), indent=1, default=str)
+        with open(PREFS_FILE, "w", encoding="utf-8") as fh:
+            json.dump(d, fh, indent=1, default=str)
     except Exception:
         pass                                  # remembering settings is a convenience, never a reason to fail
 
@@ -182,7 +185,8 @@ def help_sections():
     f = os.path.join(HELP_DIR, "QUICKSTART_GUI.md")
     if not os.path.exists(f):
         return {}, ""
-    text = open(f, encoding="utf-8").read()
+    with open(f, encoding="utf-8") as fh:
+        text = fh.read()
     out = {}
     for part in text.split("\n## ")[1:]:
         num = part.split()[0]
@@ -293,11 +297,14 @@ def scan_folder(folder, procno):
         title, field = "", None
         for tf in (os.path.join(d, "pdata", str(procno), "title"), os.path.join(d, "pdata", "1", "title")):
             if os.path.exists(tf):
-                title = " ".join(open(tf, errors="ignore").read().split())[:60]
+                with open(tf, encoding="latin-1") as fh:
+                    title = " ".join(fh.read().split())[:60]
                 break
         try:
             if os.path.exists(os.path.join(d, "acqus")):
-                for ln in open(os.path.join(d, "acqus"), errors="ignore"):
+                with open(os.path.join(d, "acqus"), encoding="latin-1") as fh:
+                    acq = fh.read().splitlines()
+                for ln in acq:
                     if ln.startswith("##$BF1="):
                         field = float(ln.split("=")[1])
         except Exception:
@@ -324,8 +331,8 @@ class InfoWorker(QThread):
             if not s["processed"]:
                 continue
             try:
-                ppm, y, sf, _ = q.read_spectrum(s["path"], self.procno)
-                t = q.fit_tsp(ppm, y, sf)
+                ppm, y, sf, _ = q.read_spectrum(s["path"], self.procno, S=DEFAULTS)
+                t = q.fit_tsp(ppm, y, sf, S=DEFAULTS)
                 snr = t["height"] / q.noise_sigma(ppm, y)
                 check = "OK"
                 if snr < 200:
@@ -347,7 +354,7 @@ class LibraryWorker(QThread):
 
     def run(self):
         try:
-            lib = q.prepare_library(q.build_library(self.sf, os.path.join(q.HERE, "library"), CACHE), self.sf, False)
+            lib = q.prepare_library(q.build_library(self.sf, os.path.join(q.HERE, "library"), CACHE, S=DEFAULTS), self.sf, False)
             self.ready.emit(lib)
         except Exception:
             self.ready.emit(None)
@@ -537,7 +544,7 @@ class SpectraTab(QWidget):
         """(ppm referenced to the reference peak, intensity, reference height) of a processed spectrum, cached."""
         key = (s["path"], self.procno.value())
         if key not in self.cache:
-            ppm, y, sf, _ = q.read_spectrum(s["path"], self.procno.value())
+            ppm, y, sf, _ = q.read_spectrum(s["path"], self.procno.value(), S=DEFAULTS)
             ppm = fp.reference(ppm, y)
             ref = float(y[np.abs(ppm) < 0.02].max()) if (np.abs(ppm) < 0.02).any() else float(y.max())
             self.cache[key] = (ppm, y, ref)
@@ -867,7 +874,7 @@ class ProcessTab(QWidget):
                     r = fp.finish(self._prep(dict(s, proc_lb=s.get("ts_lb") if s.get("ts_lb") is not None
                                                    else s["proc_lb"])), 0.0, 0.0)
                 else:
-                    ppm, y, _, _ = q.read_spectrum(s["path"], self.procno())
+                    ppm, y, _, _ = q.read_spectrum(s["path"], self.procno(), S=DEFAULTS)
                     r = dict(ppm=fp.reference(ppm, y), y=y)
             else:
                 r = fp.finish(self._prep(s), s["proc_ph0"], s["proc_ph1"], baseline=s["proc_baseline"])
@@ -1153,8 +1160,8 @@ class RegionsTab(QWidget):
         sel = [s for s in self.win.spectra if s["selected"] and s["processed"]]
         if sel and (self.spec is None or self.spec[0] != sel[0]["path"]):
             try:
-                ppm, y, sf, _ = q.read_spectrum(sel[0]["path"], self.win.spectra_tab.procno.value())
-                t = q.fit_tsp(ppm, y, sf)
+                ppm, y, sf, _ = q.read_spectrum(sel[0]["path"], self.win.spectra_tab.procno.value(), S=DEFAULTS)
+                t = q.fit_tsp(ppm, y, sf, S=DEFAULTS)
                 self.spec = (sel[0]["path"], ppm - t["centre"], y, sel[0]["expno"])
                 self.start_library(sf)
             except Exception:
@@ -1448,12 +1455,14 @@ class SettingsTab(QWidget):
     def save(self):
         f, _ = QFileDialog.getSaveFileName(self, "Save settings", "MANC-Q settings.json", "Settings (*.json)")
         if f:
-            json.dump(dict(settings=self.to_json(), regions=self.win.regions_tab.to_json()), open(f, "w"), indent=2)
+            with open(f, "w", encoding="utf-8") as fh:
+                json.dump(dict(settings=self.to_json(), regions=self.win.regions_tab.to_json()), fh, indent=2)
 
     def load(self):
         f, _ = QFileDialog.getOpenFileName(self, "Load settings", "", "Settings (*.json)")
         if f:
-            d = json.load(open(f))
+            with open(f, encoding="utf-8") as fh:
+                d = json.load(fh)
             self.from_json(d.get("settings", {})); self.win.regions_tab.from_json(d.get("regions", {}))
 
 
@@ -1546,7 +1555,8 @@ class RunTab(QWidget):
     def tick(self):
         f = os.path.join(self.out or "", "run_log.txt")
         if os.path.exists(f):
-            txt = open(f, errors="ignore").read()
+            with open(f, encoding="utf-8", errors="replace") as fh:
+                txt = fh.read()
             if len(txt) > self.log_pos:
                 self.log.appendPlainText(txt[self.log_pos:].rstrip("\n")); self.log_pos = len(txt)
         if self.worker is not None and self.worker.isRunning() and self.n_done < self.n_total:
@@ -1717,7 +1727,11 @@ class ResultsTab(QWidget):
     def load(self, out):
         self.out = out
         self.spec_cache, self.peak_cache = {}, {}
-        self.data = rs.load(out)
+        try:
+            self.data = rs.load(out)
+        except rs.ResultsTooNew as exc:
+            self.out = None
+            warn(self, str(exc)); return
         self.where.setText(f"Results folder: {out}  (Ctrl+C or right-click copies the selected values)")
         self.fill()
         self.win.add_recent(out)
@@ -2446,7 +2460,11 @@ class ReviewTab(QWidget):
                 return
             self.out, self.fits, self.fit, self.name, self.dirty = out, {}, None, None, set()
             self.undo_stack, self.redo_stack = {}, {}
-            data = rs.load(out)
+            try:
+                data = rs.load(out)
+            except rs.ResultsTooNew as exc:
+                self.out = None
+                warn(self, str(exc)); return
             self.sample.blockSignals(True); self.sample.clear()
             titles = dict(zip(data["qc"]["sample"], data["qc"].get("title", pd.Series(dtype=str)).fillna("")))
             ph = ph_labels(data["qc"])
@@ -2480,6 +2498,10 @@ class ReviewTab(QWidget):
             try:
                 from mancq import manual as mn
                 self.fits[smp] = mn.SampleFit(self.out, smp)
+            except (rs.LibraryChanged, rs.ResultsTooNew) as exc:
+                QApplication.restoreOverrideCursor()
+                self.fit = None; self.table.setRowCount(0)
+                warn(self, f"Cannot review sample {smp}: {exc}"); return
             except Exception as exc:
                 QApplication.restoreOverrideCursor()
                 self.fit = None; self.table.setRowCount(0)
@@ -3127,9 +3149,9 @@ class MainWindow(QMainWindow):
                         OVERLAYS=st.overlays.isChecked(), RESUME=True, PROCESSING=processing)
         settings["existing"] = existing
         settings.update(self.regions_tab.engine_settings())
-        json.dump(dict(folder=self.folder, settings=st.to_json(), regions=self.regions_tab.to_json(),
-                       processing=processing),
-                  open(os.path.join(out, "MANC-Q settings used.json"), "w"), indent=2, default=str)
+        with open(os.path.join(out, "MANC-Q settings used.json"), "w", encoding="utf-8") as fh:
+            json.dump(dict(folder=self.folder, settings=st.to_json(), regions=self.regions_tab.to_json(),
+                           processing=processing), fh, indent=2, default=str)
         job = dict(folder=self.folder if os.path.exists(os.path.join(self.folder, "acqus")) is False else
                    os.path.dirname(self.folder.rstrip("/\\")),
                    out=out, ref_mm=st.ref_mm.value(), dilution=single, dilution_file=dil_file,

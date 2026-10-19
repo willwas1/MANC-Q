@@ -21,6 +21,7 @@ import pandas as pd
 from scipy.optimize import nnls
 from scipy.ndimage import maximum_filter1d
 from . import engine as q
+from . import results as rs
 
 WIDTH_GRID = (0.7, 0.85, 1.0, 1.15, 1.3, 1.6, 2.0)   # linewidth factors tried by best_fit
 SHIFT_RANGE_HZ, SHIFT_STEP_HZ = 6.0, 0.25            # compound shifts tried by best_fit, around the current one
@@ -43,12 +44,13 @@ def save_edits(out, smp, edits):
         if os.path.exists(f):
             os.remove(f)
         return
-    json.dump(dict(mancq_version=q.__version__, sample=smp,
-                   about="Manual adjustments made in the MANC-Q Review step. conc_mM: whole compound at this "
-                         "concentration (mM in the original sample); shift_Hz: move of the whole compound from "
-                         "the automatic fit; mult_shift_Hz: extra move of single multiplets; width: linewidth "
-                         "factor relative to the automatic fit.",
-                   edits=edits), open(f, "w"), indent=1)
+    with open(f, "w", encoding="utf-8") as fh:
+        json.dump(dict(mancq_version=q.__version__, sample=smp,
+                       about="Manual adjustments made in the MANC-Q Review step. conc_mM: whole compound at this "
+                             "concentration (mM in the original sample); shift_Hz: move of the whole compound from "
+                             "the automatic fit; mult_shift_Hz: extra move of single multiplets; width: linewidth "
+                             "factor relative to the automatic fit.",
+                       edits=edits), fh, indent=1)
 
 
 class SampleFit:
@@ -59,10 +61,12 @@ class SampleFit:
         f = os.path.join(per, f"{smp}_fit.npz")
         if not os.path.exists(f):
             raise FileNotFoundError(f"no saved fit for sample {smp} in {per}")
+        libdir = library_dir or os.path.join(q.HERE, "library")
+        rs.check_library(out, libdir)           # same layout and compound library as this MANC-Q
         d = np.load(f, allow_pickle=False)
         if "mp_json" not in d:
             raise ValueError(f"sample {smp} was fitted by MANC-Q 1.1.0 or earlier; fit it again with this version "
-                             "(untick re-use or use a new results folder) to review it")
+                             "(into a new results folder) to review it")
         self.out, self.smp = out, smp
         self.x = np.asarray(d["x"], float)
         self.yv = np.asarray(d["yv"], float)
@@ -71,20 +75,18 @@ class SampleFit:
         self.sigma, self.fw0, self.sf, self.cf = float(d["sigma"]), float(d["fw0"]), float(d["sf"]), float(d["cf"])
         self.dx = float(d["dx"])
         pl = bool(d["pluronic"]) if "pluronic" in d else True
-        libdir = library_dir or os.path.join(q.HERE, "library")
-        self.lib = q.prepare_library(q.build_library(self.sf, libdir, os.path.join(out, "_cache")), self.sf, pl)
+        self.S = q.Settings.load(out)              # the settings this run was fitted with
+        self.lib = q.prepare_library(q.build_library(self.sf, libdir, os.path.join(out, "_cache"), S=self.S),
+                                     self.sf, pl)
         self.names = [c["name"] for c in self.lib]
         self.index = {n: k for k, n in enumerate(self.names)}
-        self.MP = []
-        for m in json.loads(str(d["mp_json"])):
-            m = dict(m)
-            m["p"], m["it"] = np.asarray(m["p"], float), np.asarray(m["it"], float)
-            self.MP.append(m)
+        _, self.MP = rs.load_fit(out, smp, self.lib)
         self.MPk = {k: [i for i, m in enumerate(self.MP) if m["k"] == k] for k in range(len(self.lib))}
         self.eta = float(d["eta"]) if "eta" in d else None
-        lm = maximum_filter1d(np.abs(self.yv), size=max(3, int(q.S["TAIL_WINDOW_PPM"] / self.dx)))
-        self.wts = 1.0 / np.sqrt(self.sigma ** 2 + (q.S["REL_MODEL_ERROR"] * np.abs(self.yv)) ** 2 +
-                                 (q.S["TAIL_ERROR"] * lm) ** 2)
+        S = self.S
+        lm = maximum_filter1d(np.abs(self.yv), size=max(3, int(S["TAIL_WINDOW_PPM"] / self.dx)))
+        self.wts = 1.0 / np.sqrt(self.sigma ** 2 + (S["REL_MODEL_ERROR"] * np.abs(self.yv)) ** 2 +
+                                 (S["TAIL_ERROR"] * lm) ** 2)
         if self.eta is None:
             self.eta = self._estimate_eta()
         self.auto = {}
@@ -256,7 +258,7 @@ class SampleFit:
                 if den <= 0:
                     continue
                 a = max(0.0, float((w2 * col * r).sum() / den))
-                ssr = float((w2 * (r - a * col) ** 2).sum()) * (1.0 + q.S["SHIFT_PRIOR"] * (sh / 10.0) ** 2)
+                ssr = float((w2 * (r - a * col) ** 2).sum()) * (1.0 + self.S["SHIFT_PRIOR"] * (sh / 10.0) ** 2)
                 if best is None or ssr < best[0]:
                     best = (ssr, a, float(sh), float(wf))
         if best is None:
@@ -329,40 +331,37 @@ class SampleFit:
                                   index=False, float_format="%.6g")
         if overlay:
             gr = q.apply_manual(self.out, self.grades.reset_index())
-            q.overlay_pdf(res, self.lib, gr, self.smp, os.path.join(self.out, f"overlay_sample_{self.smp}.pdf"))
+            q.overlay_pdf(res, self.lib, gr, self.smp, os.path.join(self.out, f"overlay_sample_{self.smp}.pdf"),
+                          S=self.S)
 
 
 def update_results(out, samples=None, log=print):
     """Rebuild the tables and plots of a finished run with the manual adjustments saved in _per_sample (nothing
     is refitted). samples: also redraw these samples' overlays (e.g. ones whose adjustments were just removed);
     samples with adjustments are always redrawn."""
-    from .regrade import restore_settings
-    keep = dict(q.S)
-    try:
-        restore_settings(out, grading_from_run=True)
-        per = os.path.join(out, "_per_sample")
-        qcf = os.path.join(out, "qc_per_sample.csv")
-        order = list(pd.read_csv(qcf, dtype={"sample": str})["sample"]) if os.path.exists(qcf) else []
-        order += sorted({f[:-len("_grades.csv")] for f in os.listdir(per) if f.endswith("_grades.csv")} - set(order),
-                        key=lambda s: (len(s), s))
-        done = [s for s in order if all(os.path.exists(os.path.join(per, f"{s}_{k}.csv"))
-                                        for k in ("grades", "peaks", "obs", "qc"))]
-        redraw = set(samples or []) | {s for s in done if os.path.exists(q.manual_file(out, s))}
-        overlays = bool(q.S.get("OVERLAYS", True))
-        for s in sorted(redraw, key=lambda s: (len(s), s)):
-            if s in done and os.path.exists(os.path.join(per, f"{s}_fit.npz")):
-                SampleFit(out, s).write_outputs(overlay=overlays)
-                log(f"  {s}: overlay and simulated spectrum redrawn ({len(q.read_manual(out, s))} adjusted)")
-        grades = [pd.read_csv(os.path.join(per, f"{s}_grades.csv"), dtype={"sample": str}) for s in done]
-        peaks = [pd.read_csv(os.path.join(per, f"{s}_peaks.csv"), dtype={"sample": str}) for s in done]
-        obs = [pd.read_csv(os.path.join(per, f"{s}_obs.csv"), dtype={"sample": str}) for s in done]
-        qc = [pd.read_csv(os.path.join(per, f"{s}_qc.csv"), dtype={"sample": str}).iloc[0].to_dict() for s in done]
-        sf = float(qc[0]["SF_MHz"])
-        lib = q.prepare_library(q.build_library(sf, q.S["LIBRARY_DIR"] or os.path.join(q.HERE, "library"),
-                                                os.path.join(out, "_cache")), sf, True)
-        log(f"Applying manual adjustments to {out} ...")
-        G = q.aggregate_outputs(out, grades, peaks, obs, qc, lib, done, log)
-    finally:
-        q.S.clear()
-        q.S.update(keep)
+    from .regrade import run_settings
+    rs.check_library(out)                      # same layout and compound library as this MANC-Q
+    S = run_settings(out, grading_from_run=True)
+    per = os.path.join(out, "_per_sample")
+    qcf = os.path.join(out, "qc_per_sample.csv")
+    order = list(pd.read_csv(qcf, dtype={"sample": str})["sample"]) if os.path.exists(qcf) else []
+    order += sorted({f[:-len("_grades.csv")] for f in os.listdir(per) if f.endswith("_grades.csv")} - set(order),
+                    key=lambda s: (len(s), s))
+    done = [s for s in order if all(os.path.exists(os.path.join(per, f"{s}_{k}.csv"))
+                                    for k in ("grades", "peaks", "obs", "qc"))]
+    redraw = set(samples or []) | {s for s in done if os.path.exists(q.manual_file(out, s))}
+    overlays = bool(S.get("OVERLAYS", True))
+    for s in sorted(redraw, key=lambda s: (len(s), s)):
+        if s in done and os.path.exists(os.path.join(per, f"{s}_fit.npz")):
+            SampleFit(out, s).write_outputs(overlay=overlays)
+            log(f"  {s}: overlay and simulated spectrum redrawn ({len(q.read_manual(out, s))} adjusted)")
+    grades = [pd.read_csv(os.path.join(per, f"{s}_grades.csv"), dtype={"sample": str}) for s in done]
+    peaks = [pd.read_csv(os.path.join(per, f"{s}_peaks.csv"), dtype={"sample": str}) for s in done]
+    obs = [pd.read_csv(os.path.join(per, f"{s}_obs.csv"), dtype={"sample": str}) for s in done]
+    qc = [pd.read_csv(os.path.join(per, f"{s}_qc.csv"), dtype={"sample": str}).iloc[0].to_dict() for s in done]
+    sf = float(qc[0]["SF_MHz"])
+    lib = q.prepare_library(q.build_library(sf, S["LIBRARY_DIR"] or os.path.join(q.HERE, "library"),
+                                            os.path.join(out, "_cache"), S=S), sf, True)
+    log(f"Applying manual adjustments to {out} ...")
+    G = q.aggregate_outputs(out, grades, peaks, obs, qc, lib, done, log, S=S)
     return G

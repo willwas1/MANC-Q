@@ -280,7 +280,8 @@ class FiguresTab(QWidget):
         spec = F.default_spec(self.R)
         try:
             if os.path.exists(self.settings_file()):
-                spec.update(json.load(open(self.settings_file())))
+                with open(self.settings_file(), encoding="utf-8") as fh:
+                    spec.update(json.load(fh))
         except (ValueError, OSError):
             pass
         self.spec = spec
@@ -484,7 +485,8 @@ class FiguresTab(QWidget):
     def save_settings(self):
         try:
             os.makedirs(os.path.dirname(self.settings_file()), exist_ok=True)
-            json.dump(self.spec, open(self.settings_file(), "w"), indent=1, default=str)
+            with open(self.settings_file(), "w", encoding="utf-8") as fh:
+                json.dump(self.spec, fh, indent=1, default=str)
         except OSError:
             pass
 

@@ -337,6 +337,8 @@ def write_processed(res, folder, title=""):
              "LB": res["lb"], "PHC0": res["ph0"], "PHC1": res["ph1"]}
     text = "##TITLE= MANC-Q processed\n##JCAMPDX= 5.0\n" + "".join(f"##${k}= {v}\n" for k, v in procs.items()) + "##END=\n"
     for fn in ("procs", "proc"):
-        open(os.path.join(pdir, fn), "w").write(text)
-    open(os.path.join(pdir, "title"), "w").write(title or "processed from FID by MANC-Q")
+        with open(os.path.join(pdir, fn), "w", encoding="latin-1") as fh:
+            fh.write(text)
+    with open(os.path.join(pdir, "title"), "w", encoding="latin-1") as fh:
+        fh.write(title or "processed from FID by MANC-Q")
     return folder

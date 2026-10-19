@@ -1,5 +1,6 @@
 """Checks of the warnings and quality flags of MANC-Q 1.9.2 on synthetic data only (seconds, no fitting).
 Run with:  python -m pytest tests   (or:  python tests/test_qc.py)"""
+from pathlib import Path
 import os
 import sys
 import tempfile
@@ -9,6 +10,14 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mancq import engine as q
 from mancq import demo as dm
+
+
+def _read(p):
+    return Path(p).read_text(encoding="utf-8")
+
+
+def _write(p, text):
+    Path(p).write_text(text, encoding="utf-8")
 
 
 def tsp_spectrum(phase_deg=0.0, lo=-1.0, hi=12.0, n=60000, seed=0):
@@ -25,7 +34,7 @@ def tsp_spectrum(phase_deg=0.0, lo=-1.0, hi=12.0, n=60000, seed=0):
 def test_tsp_phase_error_is_measured():
     for ph in (0.0, 1.5, -3.0):
         x, y, sf = tsp_spectrum(ph)
-        t = q.fit_tsp(x, y, sf)
+        t = q.fit_tsp(x, y, sf, S=q.Settings())
         assert abs(t["phase_deg"] - ph) < 0.4, (ph, t["phase_deg"])
 
 
@@ -33,7 +42,7 @@ def test_no_tsp_message():
     x, y, sf = tsp_spectrum()
     y = np.random.default_rng(1).normal(0, 1, len(x))
     try:
-        q.fit_tsp(x, y, sf)
+        q.fit_tsp(x, y, sf, S=q.Settings())
         raise AssertionError("no error without a TSP peak")
     except ValueError as exc:
         assert "near 0 ppm" in str(exc)
@@ -51,9 +60,9 @@ def test_noise_without_free_region():
 def test_dilutions_file_and_warnings():
     with tempfile.TemporaryDirectory() as tmp:
         f = os.path.join(tmp, "dil.csv")
-        open(f, "w").write("Sample;Dilution\nEXPNO 10;2\n11.0;3\n99;4\n")
+        _write(f, "Sample;Dilution\nEXPNO 10;2\n11.0;3\n99;4\n")
         msgs = []
-        d = q.read_dilutions(f, ["10", "11", "12"], msgs.append)
+        d = q.read_dilutions(f, ["10", "11", "12"], msgs.append, S=q.Settings())
         assert d["10"] == 2 and d["11"] == 3
         text = " ".join(msgs)
         assert "no dilution for EXPNO 12" in text and "99" in text
@@ -64,11 +73,11 @@ def test_plain_messages_when_reading():
         e = os.path.join(tmp, "20"); os.makedirs(os.path.join(e, "pdata", "1"))
         for what, setup in (("no 'procs' file", lambda: None),
                             ("choose that processing number", lambda: None),
-                            ("2D experiment", lambda: open(os.path.join(e, "acqu2s"), "w").close())):
+                            ("2D experiment", lambda: _write(os.path.join(e, "acqu2s"), ""))):
             setup()
             procno = 2 if "processing number" in what else 1
             try:
-                q.read_spectrum(e, procno)
+                q.read_spectrum(e, procno, S=q.Settings())
                 raise AssertionError(f"no error ({what})")
             except ValueError as exc:
                 assert what in str(exc), (what, str(exc))
@@ -82,7 +91,7 @@ def test_qc_flags():
              signal_explained_by_library=0.97, unassigned_singlets=2, TSP_phase_deg=1.5, D1_s=8.0, AQ_s=2.7),
         dict(sample="3", TSP_fwhm_Hz=1.0, metabolite_fwhm_Hz=1.0, chi2_per_point=12.0,
              signal_explained_by_library=0.6, unassigned_singlets=50, TSP_phase_deg=0.1, D1_s=1.0, AQ_s=2.0)])
-    f = q.qc_flags(Q).set_index("sample")
+    f = q.qc_flags(Q, S=q.Settings()).set_index("sample")
     assert f.at["1", "qc_flag"] == "ok", f.at["1", "qc_reason"]
     assert f.at["2", "qc_flag"] == "check"
     r2 = f.at["2", "qc_reason"]

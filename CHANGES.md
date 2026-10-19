@@ -2,6 +2,32 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 1.10.0 (19 October 2026)
+
+Structure for the future. No change in results: the demo gives exactly the same values as 1.9.2.
+
+* **Settings per run.** The settings at the top of `engine.py` are now only the defaults. Each run makes its
+  own settings, passes them to every step, saves them with the results, and regrade, the Review step and
+  apply-edits read them back from the results folder. Before, there was one shared set that some steps
+  changed and then put back, so a step could see another run's settings. A misspelt setting name is now an
+  error instead of being ignored. For scripts: `regrade(out, LOQ_SNR=8)` changes a grading setting for one
+  regrade.
+* **Results folders carry a format number** (`RESULTS_FORMAT` in `run_settings.json`). A folder made by a
+  newer MANC-Q is refused with a clear message ("Install MANC-Q x or later to open it") instead of being
+  misread. Everything needed to read older folders is now in one place (`mancq/results.py`).
+* **The compound library is checked.** Each saved fit now records the compound name of every multiplet, and
+  regrade, the Review step and apply-edits refuse, with a clear message, a folder fitted with a different
+  compound library from the installed one, instead of mixing the two.
+* **One version number,** kept in `pyproject.toml` only. MANC-Q reads it from there (or from the installed
+  package's metadata; the Windows app now includes it). `python packaging/set_version.py X.Y.Z` sets it and
+  copies it into `CITATION.cff`, `installer.iss` and `constraints.txt`.
+* **Dependencies:** the minimum versions in `pyproject.toml` are now the ones actually tested (Python 3.12,
+  numpy 2.3, scipy 1.16, pandas 2.3, matplotlib 3.10, nmrglue 0.12, openpyxl 3.1, PySide6 6.9). The GitHub
+  tests now run on Python 3.12 and 3.13.
+* Every text file is opened with an explicit encoding (UTF-8 for MANC-Q's own files, Latin-1 for TopSpin's)
+  and closed straight after, also when something goes wrong.
+* New check `tests/test_results_format.py`.
+
 ## 1.9.2 (19 October 2026)
 
 * **A quality flag for every spectrum.** `qc_flag` (ok / check / poor) and `qc_reason` in the QC sheet, and

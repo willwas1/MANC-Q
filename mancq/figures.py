@@ -269,6 +269,8 @@ class Results:
     """A finished results folder, read once: QC, values, peak list, and each sample's fitted spectrum on demand."""
 
     def __init__(self, out):
+        from . import results
+        results.check_readable(out)              # a folder from a newer MANC-Q is refused, not misread
         self.out = out
         self.long = pd.read_csv(os.path.join(out, "concentrations_long.csv"), dtype={"sample": str})
         self.qc = pd.read_csv(os.path.join(out, "qc_per_sample.csv"), dtype={"sample": str}).set_index("sample")
@@ -277,7 +279,10 @@ class Results:
         self.samples = list(dict.fromkeys(self.long["sample"]))
         self.titles = {s: str(self.qc.title.get(s, "")) if "title" in self.qc else "" for s in self.samples}
         rs = os.path.join(out, "_per_sample", "run_settings.json")
-        self.run_settings = json.load(open(rs)) if os.path.exists(rs) else {}
+        self.run_settings = {}
+        if os.path.exists(rs):
+            with open(rs, encoding="utf-8") as fh:
+                self.run_settings = json.load(fh)
         self._spec = {}
 
     def spectrum(self, s):
@@ -1189,7 +1194,8 @@ def export(spec, out, base, formats=("pdf",), extras=(), caption_text=None, shee
             written.append(f)
     if "caption" in extras:
         f = f"{base}_caption.txt"
-        open(f, "w", encoding="utf-8").write((caption_text or info.get("caption", "")) + "\n")
+        with open(f, "w", encoding="utf-8") as fh:
+            fh.write((caption_text or info.get("caption", "")) + "\n")
         written.append(f)
     if "data" in extras and info.get("plotted"):
         f = f"{base}_data.csv"
@@ -1212,20 +1218,24 @@ def export(spec, out, base, formats=("pdf",), extras=(), caption_text=None, shee
                              f"{qrow.get('SF_MHz', float('nan')):.2f} MHz; {R.reference()} linewidth "
                              f"{qrow.get('TSP_fwhm_Hz', float('nan')):.2f} Hz; pulse sequence {R.pulse_program(s) or 'unknown'}")
         lines += ["", "Figure settings:", json.dumps(spec, indent=1, default=str)]
-        open(f, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+        with open(f, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
         written.append(f)
     if "script" in extras:
         fj, fp = f"{base}_figure.json", f"{base}_redraw.py"
-        json.dump(dict(spec=spec, results=os.path.abspath(out),
-                       sheet=sheet.to_dict(orient="list")), open(fj, "w"), indent=1, default=str)
-        open(fp, "w", encoding="utf-8").write(
+        with open(fj, "w", encoding="utf-8") as fh:
+            json.dump(dict(spec=spec, results=os.path.abspath(out),
+                           sheet=sheet.to_dict(orient="list")), fh, indent=1, default=str)
+        with open(fp, "w", encoding="utf-8") as fh:
+            fh.write(
             '"""Draws this figure again with MANC-Q (run it with the Python MANC-Q is installed in):\n'
             f'    python "{os.path.basename(fp)}"\n'
             'Change the settings in the .json file next to it (width_mm, font_pt, labels, ...) and run it again.\n'
             'It needs the MANC-Q results folder named in the .json file."""\n'
             "import json, os\nimport pandas as pd\nfrom mancq import figures\n\n"
             "here = os.path.dirname(os.path.abspath(__file__))\n"
-            f"cfg = json.load(open(os.path.join(here, {os.path.basename(fj)!r})))\n"
+            f"with open(os.path.join(here, {os.path.basename(fj)!r}), encoding='utf-8') as fh:\n"
+            f"    cfg = json.load(fh)\n"
             f"base = os.path.join(here, {os.path.basename(base)!r})\n"
             "figures.export(cfg['spec'], cfg['results'], base, formats=('pdf', 'png'),\n"
             "               sheet=pd.DataFrame(cfg['sheet']).fillna(''))\n"
