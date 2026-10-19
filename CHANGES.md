@@ -2,6 +2,35 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 1.9.0 (19 October 2026)
+
+**This version changes tiers and some values. Rerun any data you plan to publish**, in particular anything
+with creatine, choline or the 3.19 to 3.27 ppm trimethylammonium region.
+
+* **Compounds that are not there no longer take signal from those that are.** A library compound that only
+  sits on other compounds' peaks is now left out of the fit (setting `DROP_GHOSTS`). That means none of its
+  multiplets is dominant, and either the amount its signal implies would put another of its multiplets
+  clearly above the noise where the spectrum shows almost nothing, or (not for pH-sensitive compounds) it
+  has moved at least `GHOST_SHIFT_HZ` (5 Hz) from its library position and the fit gives its other
+  multiplets almost nothing. Its Long_table `method` says why, and it is graded Upper bound only or Not
+  detected. In the demo this was what made choline 18 % low (O-acetylcarnitine sat on its singlet) and
+  creatine 5 % low (creatinine sat on its singlet).
+* **A reporter is checked against the rest of its molecule.** Quantified now also needs the molecule's
+  other multiplets above LOQ (whatever their overlap) to give a median value within `MAX_REPORTER_DISAGREE`
+  (20 %) of the reporter value. A lone singlet reporter needs another multiplet of the molecule to agree
+  (`SINGLET_NEEDS_SECOND`). Molecules with no other multiplet, such as acetate and formate, are exempt,
+  because there is nothing to confirm them with. Otherwise the value is graded Overlapped and its `method`
+  says why.
+* **Each multiplet's own fitted amount is checked**, not only the final value: a multiplet whose own amount
+  would put the molecule's other multiplets clearly above the noise where they are missing is never used as
+  a reporter (new column `implies_missing_multiplets` in Peak_list_by_metabolite). If that compound ends up
+  without a value, the compound whose peak it sits on gets a `check_note` (also shown in the Results step).
+* Demo, EXPNO 10 (processed) before and after: choline 0.816 -> 0.999, creatine 0.947 -> 1.000, glutamine
+  0.935 (Overlapped) -> 0.998 (Quantified), threonine now Quantified; three absent compounds that were
+  graded with a value (oxaloacetate Quantified, succinate Overlapped, carnitine Deconvolution) are now
+  Upper bound only. EXPNO 11 (raw FID): unchanged values, methionine and threonine now Quantified.
+* The new grading settings are re-applied by `mancq regrade`.
+
 ## 1.8.2 (19 October 2026)
 
 * **Upper bounds are no longer stored as measured values.** Up to 1.8.1, a metabolite graded "Upper bound

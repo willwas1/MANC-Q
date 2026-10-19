@@ -84,6 +84,12 @@ SETTINGS = dict(
     UNKNOWN_EXCLUSION_HZ=3.0,
     COMPOUND_TIE=0.3,             # soft constraint: equal per-proton amplitude of multiplets in a compound
     MAX_UNKNOWNS=300,
+    DROP_GHOSTS=True,             # leave out of the fit a compound that only sits on other compounds' peaks: none of its
+                                  # multiplets is dominant, and the amount its signal implies would put another of its
+                                  # multiplets above CONTRADICT_MIN_SNR x noise where the data show (almost) nothing
+    GHOST_MAX_DOMINANCE=0.5,      # ... "dominant" = at least this share of the fitted signal under the multiplet
+    GHOST_SHIFT_HZ=5.0,           # ... or (not for pH-sensitive compounds) its signal is this far from the library
+                                  # position and the other multiplets it implies get almost nothing in the fit
 
     # sample pH estimate from the histidine imidazole singlets (H2 near 7.8 ppm, H4 near 7.05 ppm). It is the pH in
     # the NMR tube at acquisition, an ESTIMATE: trends are reliable, absolute pH about +/-0.2 with these constants
@@ -111,6 +117,10 @@ SETTINGS = dict(
     CONTRADICT_MIN_SNR=10, CONTRADICT_FRACTION=0.3,   # predicted multiplet >10 sigma but <30% observed -> reject
     O_MIN_DOMINANCE=0.25, O_MAX_MISFIT=0.50,
     DECONV_MAX_REL_SE=0.35, DECONV_MIN_MULTIPLETS=2,
+    MAX_REPORTER_DISAGREE=0.20,   # Quantified only if the molecule's other multiplets (above LOQ, any dominance) give a
+                                  # median value within 20% of the reporter value; otherwise Overlapped
+    SINGLET_NEEDS_SECOND=True,    # a lone singlet reporter is Quantified only if another multiplet of the molecule agrees
+                                  # (molecules with no other multiplet outside the ignored regions, e.g. acetate, are exempt)
 
     # plots
     OVERLAY_REGIONS=[(0.75, 1.10), (1.10, 1.55), (1.55, 2.00), (2.00, 2.35), (2.35, 2.75),
@@ -149,7 +159,7 @@ plt = _plt
 
 from .spinsim import simulate_spin_system, merge_sticks
 
-__version__ = "1.8.2"
+__version__ = "1.9.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -719,12 +729,57 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
     MPk = {k: [i for i, m in enumerate(MP) if m["k"] == k] for k in range(ncomp)}
     B, Dpen = spline_basis(x, lo, hi, S["BASELINE_KNOT_PPM"])
     unknown = []
+    dropped = {}                  # compounds left out of the fit (ghosts): {k: reason}
 
-    def mult_columns():
+    def mult_columns(full=False):
         M = np.zeros((len(x), nM))
         for i, m in enumerate(MP):
-            M[:, i] = mcol(x, m["p"], m["it"], m["d"], fw0 * m["wf"], eta)
+            if full or m["k"] not in dropped:
+                M[:, i] = mcol(x, m["p"], m["it"], m["d"], fw0 * m["wf"], eta)
         return M
+
+    def find_ghosts(coef):
+        """Compounds that only sit on other compounds' peaks (see DROP_GHOSTS); returns how many were dropped."""
+        base_now = B @ coef[nM + len(unknown):]
+        n = 0
+        for k, ii in MPk.items():
+            if k in dropped or len(ii) < 2 or lib[k]["source"] == "polymer":
+                continue
+            mps = [MP[i] for i in ii]
+            carry = [m for m in mps if np.isfinite(m["local_amp"]) and m["local_amp"] > 0
+                     and m["loc_h"] >= S["LOQ_SNR"] * sigma]
+            if not carry or any(m["loc_dom"] >= S["GHOST_MAX_DOMINANCE"] for m in carry):
+                continue
+            cols = {id(m): mcol(x, m["p"], m["it"], m["d"], fw0 * m["wf"], eta) for m in mps}
+            nprot = sum(m["nprot"] for m in mps)
+            for m in sorted(carry, key=lambda m: -m["loc_h"]):
+                centre = float((m["p"] * m["it"]).sum() / m["it"].sum() + m["d"])
+                where = (f"left out of the fit: its signal at {centre:.3f} ppm (multiplet {m['j'] + 1}, "
+                         f"{m['loc_dom']:.0%} of the fitted signal there)")
+                gone = _contradicted_by(m, mps, m["local_amp"], x, yv, base_now, fw0, sf, sigma, grid.dx, cols)
+                if gone:
+                    dropped[k] = f"{where} implies multiplet(s) {','.join(map(str, gone))}, which are not in the spectrum"
+                    n += 1
+                    break
+                # moved well away from its library position, and the multiplets it implies get nothing in the fit
+                # (they may sit under another compound's peaks, so the data alone cannot show they are missing)
+                shift_hz = abs(m["d"] - m["base"]) * sf
+                if lib[k]["titratable"] or shift_hz < S["GHOST_SHIFT_HZ"]:
+                    continue
+                empty = [o["j"] + 1 for o in mps if o is not m and (o["nprot"] >= 0.3 or o["nprot"] / nprot >= 0.1)
+                         and _excluded_fraction(o) < 0.5
+                         and m["local_amp"] * cols[id(o)].max() > S["CONTRADICT_MIN_SNR"] * sigma
+                         and not (np.isfinite(o["local_amp"])
+                                  and o["local_amp"] >= S["CONTRADICT_FRACTION"] * m["local_amp"])]
+                if empty:
+                    dropped[k] = (f"{where} is {shift_hz:.1f} Hz from the library position, and its multiplet(s) "
+                                  f"{','.join(map(str, empty))} get almost nothing in the fit")
+                    n += 1
+                    break
+        if n:
+            log(f"   left out of the fit (signal only on other compounds' peaks, other multiplets absent): "
+                f"{', '.join(lib[k]['name'] for k in dropped)}")
+        return n
 
     def unk_columns():
         if not unknown:
@@ -898,7 +953,7 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
         strength = np.array([sum(am[i] * M[:, i].max() for i in MPk[k]) for k in range(ncomp)])
         moved = 0
         for k in np.argsort(-strength):
-            if (lib[k]["source"] == "polymer" and lib[k].get("dmax_hz", 3.0) <= 3.0) or not MPk[k]:
+            if (lib[k]["source"] == "polymer" and lib[k].get("dmax_hz", 3.0) <= 3.0) or not MPk[k] or k in dropped:
                 continue
             ii = MPk[k]
             spans = [(MP[i]["p"].min() + MP[i]["base"] - DMAX[k] - DLT[k] - HALF_WIN / 2,
@@ -1011,6 +1066,9 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
         M = mult_columns()
         coef, fit, A = global_solve(M, U)
         log(f"   iter {it+1}: {moved} compounds re-positioned (chi2/n={c1:.2f}); {nroi} ROIs refined -> chi2/n={chi(fit):.2f}  ({time.time()-t0:.0f}s)")
+        if S["DROP_GHOSTS"] and find_ghosts(coef):
+            M = mult_columns()
+            coef, fit, A = global_solve(M, U)
 
     # ---------- unassigned singlets: only where no fitted library line is nearby ----------
     am = coef[:nM]
@@ -1071,10 +1129,12 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
         amp[k] = float((am[ii] * npr).sum() / npr.sum())
         if np.isfinite(se_m[ii]).any():
             se[k] = float(np.sqrt(np.nansum((se_m[ii] * npr) ** 2)) / npr.sum())
+    Mf = mult_columns(full=True) if dropped else M        # shapes of left-out compounds, for the upper bounds
     for i, m in enumerate(MP):
         m["global_amp"] = float(am[i])
-        m["unit_peak"] = float(M[:, i].max())
-        m["apex_ppm"] = float(x[int(np.argmax(M[:, i]))])
+        m["unit_peak"] = float(Mf[:, i].max())
+        m["apex_ppm"] = float(x[int(np.argmax(Mf[:, i]))])
+        m["dropped"] = dropped.get(m["k"], "")
         m["pinned"] = bool(abs(Dk[m["k"]]) >= DMAX[m["k"]] - 0.3 / sf) and lib[m["k"]]["source"] != "polymer"
         m["compound_shift_Hz"] = float(Dk[m["k"]] * sf)
     U = unk_columns()
@@ -1087,6 +1147,42 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
 # =============================================================================
 # 6. Grading, peak lists
 # =============================================================================
+def _observed_height(x, yv, base, apex, half, dx):
+    """Largest observed signal (above the fitted baseline) within +/-half of apex, or None if that window
+    touches an excluded region (water, PEO core) or the apex itself lies in one."""
+    j0, j1 = np.searchsorted(x, apex - half), np.searchsorted(x, apex + half)
+    seg = x[max(j0 - 1, 0):min(j1 + 1, len(x))]
+    if seg.size < 2 or np.any(np.diff(seg) > 2 * dx) or j1 <= j0:
+        return None
+    return max(float((yv[j0:j1] - base[j0:j1]).max()), 0.0)
+
+
+def _contradicted_by(i, mps, amp, x, yv, base, fw0, sf, sig, dx, cols=None):
+    """Multiplets (numbers) of one molecule that `amp` (the amount implied by multiplet i, or the reported value)
+    predicts above CONTRADICT_MIN_SNR x noise but that are (almost) absent from the data."""
+    out = []
+    nprot = sum(m["nprot"] for m in mps)
+    for o in mps:
+        if o is i or (o["nprot"] < 0.3 and o["nprot"] / nprot < 0.1):
+            continue
+        col = cols[id(o)] if cols is not None else None
+        up = float(col.max()) if col is not None else o.get("unit_peak", 0.0)
+        if up <= 0:
+            continue
+        apex = float(x[int(np.argmax(col))]) if col is not None else o["apex_ppm"]
+        hobs = _observed_height(x, yv, base, apex, 1.5 * fw0 * o["wf"] + (S["MULTIPLET_SHIFT_HZ"] + 1.0) / sf, dx)
+        if hobs is None:
+            continue
+        hpred = amp * up
+        if hpred > S["CONTRADICT_MIN_SNR"] * sig and hobs < S["CONTRADICT_FRACTION"] * hpred:
+            out.append(o["j"] + 1)
+    return out
+
+
+def _n_lines(m):
+    return int((m["it"] > 0.03 * m["it"].max()).sum())
+
+
 def _excluded_fraction(m):
     """Fraction of a multiplet's intensity whose lines sit in an ignored region or outside the fitted range."""
     pos = np.asarray(m["p"], float) + float(m["d"])
@@ -1105,7 +1201,9 @@ def grade(res, lib, sf, cf):
     bias a clean reporter."""
     x, yv, fit = res["grid"].x, res["yv"], res["fit"]
     sig = res["sigma"]
+    xg, base, dx, fw0 = res["grid"].x, res["base_fit"], res["grid"].dx, res["fw0"]
     rows, prow = [], []
+    notes = {}                    # {compound: [why another compound's fit on its peaks is suspect]}
     for k, c in enumerate(lib):
         a = res["amp"][k]
         mps = [m for m in res["MP"] if m["k"] == k]
@@ -1119,7 +1217,7 @@ def grade(res, lib, sf, cf):
             continue
         unit_peak = max(m["unit_peak"] for m in mps) if mps else 0
         snr = a * unit_peak / sig if a > 0 else 0.0
-        clean, usable = [], []
+        clean, usable, self_contra = [], [], {}
         best_dom, best_mis = 0.0, np.nan
         for m in mps:
             share = m["nprot"] / c["nprot"]
@@ -1127,6 +1225,20 @@ def grade(res, lib, sf, cf):
             la = m["local_amp"]
             pinned = m.get("pinned", False)
             ok_amp = np.isfinite(la) and la > 0
+            # the amount this multiplet's own local fit implies must not predict the molecule's other multiplets
+            # clearly above the noise where the data show nothing; if it does, the signal belongs to something else
+            gone = _contradicted_by(m, mps, la, xg, yv, base, fw0, sf, sig, dx) \
+                if ok_amp and h / sig >= S["LOQ_SNR"] else []
+            if gone:
+                self_contra[id(m)] = gone
+                ok_amp = False
+                centre = float((m["p"] * m["it"]).sum() / m["it"].sum() + m["d"])
+                partner = _main_partner(res, k, centre)
+                if partner is not None and res["amp"][k] > 0:
+                    notes.setdefault(lib[partner]["name"], []).append((c["name"],
+                        f"{c['name']} (graded without a value) is fitted on its peak at {centre:.3f} ppm although "
+                        f"its other multiplet(s) {','.join(map(str, gone))} are much smaller than that would need: "
+                        f"this value may be too low by {c['name']}'s share, or {c['name']} may be wrongly assigned"))
             is_clean = (ok_amp and not pinned and (share >= 0.1 or m["nprot"] >= 0.3) and dom >= S["Q_MIN_DOMINANCE"] and mis <= S["Q_MAX_MISFIT"]
                         and h / sig >= S["LOQ_SNR"])
             is_usable = (ok_amp and not pinned and (share >= 0.1 or m["nprot"] >= 0.3) and dom >= S["O_MIN_DOMINANCE"] and mis <= S["O_MAX_MISFIT"]
@@ -1152,6 +1264,7 @@ def grade(res, lib, sf, cf):
                 dominance=round(dom, 3), misfit=round(mis, 3) if np.isfinite(mis) else np.nan,
                 conc_this_multiplet_mM=round(la * cf, 5) if np.isfinite(la) else np.nan,
                 se_this_multiplet_mM=round(m["local_se"] * cf, 5) if np.isfinite(m["local_se"]) else np.nan,
+                implies_missing_multiplets=",".join(map(str, gone)),
                 used_as_reporter=bool(is_clean or (not clean and is_usable))))
         # a common linewidth for the whole molecule, so one badly fitted narrow multiplet
         # cannot produce a too-small upper bound
@@ -1212,6 +1325,7 @@ def grade(res, lib, sf, cf):
                 contradicted.append(m["j"] + 1)
         # the most constraining multiplet, but not a single outlier when several are available
         ub = (np.percentile(ubs, 20) if len(ubs) >= 4 else min(ubs)) * cf if ubs else np.nan
+        why_not = ""
         if np.isfinite(ub) and ub < lod:
             tier, conc = "Not detected", 0.0
         elif contradicted:
@@ -1221,14 +1335,17 @@ def grade(res, lib, sf, cf):
             tier, conc = "Upper bound only", np.nan
             method = "fitted value exceeds what the data allow at another multiplet -> data upper bound"
         elif clean and (not np.isfinite(cross) or cross <= S["MAX_REPORTER_RATIO"]) and \
-                (len(clean) >= 2 or clean[0]["nprot"] / c["nprot"] >= S["SINGLE_REPORTER_MIN_SHARE"]):
+                (len(clean) >= 2 or clean[0]["nprot"] / c["nprot"] >= S["SINGLE_REPORTER_MIN_SHARE"]) and \
+                not (why_not := _reporter_doubt(clean, mps, amp_use, self_contra, c, sig, cf)):
             tier = "Quantified"
         elif use:
             tier = "Overlapped (semi-quantitative)"
+            if clean and why_not:
+                method += f"; not Quantified: {why_not}"
         else:
             wc = a * cf if a > 0 else 0.0
             wc_se = res["se"][k] * cf if np.isfinite(res["se"][k]) else np.nan
-            n_fit = sum(1 for m in mps if m.get("loc_h", 0) > S["LOQ_SNR"] * sig)
+            n_fit = sum(1 for m in mps if m.get("loc_h", 0) > S["LOQ_SNR"] * sig and id(m) not in self_contra)
             if (np.isfinite(ub) and np.isfinite(wc_se) and wc > lod and wc <= ub
                     and n_fit >= S["DECONV_MIN_MULTIPLETS"]
                     and wc_se <= S["DECONV_MAX_REL_SE"] * wc):
@@ -1242,6 +1359,9 @@ def grade(res, lib, sf, cf):
                 method = "no usable reporter -> data upper bound"
         if tier == "Upper bound only":
             se = np.nan                       # a bound is not a measurement (the bound is in upper_bound_mM)
+        left_out = next((m["dropped"] for m in mps if m.get("dropped")), "")
+        if left_out:
+            method = f"{left_out}; {method}"
         # centre (ppm, as fitted) of the multiplet(s) the value comes from, for the tiers that use reporters
         rep_ppm = ";".join(f"{float((m['p'] * m['it']).sum() / m['it'].sum() + m['d']):.4f}" for m in use)             if tier in ("Quantified", "Overlapped (semi-quantitative)") else ""
         rows.append(dict(metabolite=c["name"], cls=c["cls"], tier=tier, conc_mM=conc, se_mM=se,
@@ -1250,7 +1370,49 @@ def grade(res, lib, sf, cf):
                          best_misfit=round(best_mis, 3) if np.isfinite(best_mis) else np.nan,
                          n_reporters=len(use), reporter_ratio=round(cross, 3) if np.isfinite(cross) else np.nan,
                          source=c["source"], provenance=c["provenance"]))
+    # a note on a compound only when the one fitted on its peak ends up without a value (likely not really there)
+    no_value = {r["metabolite"] for r in rows if r["tier"] in ("Upper bound only", "Not detected")}
+    for r in rows:
+        r["check_note"] = "; ".join(t for who, t in notes.get(r["metabolite"], []) if who in no_value) \
+            if r["tier"] != NOTMEAS else ""
     return pd.DataFrame(rows), pd.DataFrame(prow)
+
+
+def _main_partner(res, k, ppm):
+    """The compound (index) other than k with the largest fitted signal at ppm, or None."""
+    best, who = 0.0, None
+    xp = np.array([ppm])
+    for o in res["MP"]:
+        if o["k"] == k or o.get("global_amp", 0.0) <= 0:
+            continue
+        v = o["global_amp"] * float(mcol(xp, o["p"], o["it"], o["d"], res["fw0"] * o["wf"], res.get("eta", 0.7))[0])
+        if v > best:
+            best, who = v, o["k"]
+    return who
+
+
+def _reporter_doubt(clean, mps, amp_use, self_contra, c, sig, cf):
+    """Why reporter value(s) that pass the per-multiplet tests should still not be graded Quantified (or ""):
+    the molecule's other multiplets (above LOQ, outside ignored regions, any dominance) give a different value,
+    or a lone singlet reporter is not confirmed by another multiplet."""
+    def measurable(m):
+        return (m["unit_peak"] > 0 and _excluded_fraction(m) < 0.5
+                and (m["nprot"] >= 0.3 or m["nprot"] / c["nprot"] >= 0.1))
+    rest = [m for m in mps if all(m is not u for u in clean) and measurable(m)]
+    others = [m for m in rest if np.isfinite(m["local_amp"]) and m["local_amp"] > 0 and id(m) not in self_contra
+              and m.get("loc_h", 0.0) >= S["LOQ_SNR"] * sig]
+    lim = S["MAX_REPORTER_DISAGREE"]
+    if others and amp_use > 0:
+        med = float(np.median([m["local_amp"] for m in others]))
+        rel = med / amp_use - 1
+        if abs(rel) > lim:
+            return (f"the other multiplet(s) {','.join(str(m['j'] + 1) for m in others)} give {med * cf:.3g} mM, "
+                    f"{rel:+.0%} from the reporter (more than {lim:.0%})")
+    if S["SINGLET_NEEDS_SECOND"] and len(clean) == 1 and _n_lines(clean[0]) == 1 and rest:
+        agree = [m for m in others if abs(m["local_amp"] / amp_use - 1) <= lim] if amp_use > 0 else []
+        if not agree:
+            return "the only clean reporter is a singlet and no other multiplet of the molecule confirms it"
+    return ""
 
 
 def observed_peaks(res, lib, sample, sf):
@@ -1883,8 +2045,8 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         f"MANC-Q {__version__} (https://github.com/willwas1/MANC-Q), results written {time.strftime('%Y-%m-%d %H:%M')}.",
         "mM in the original medium = tube mM x dilution factor (from the dilution file).",
         f"{S['REFERENCE']} internal standard only: {S['TSP_MM_IN_TUBE']} mM in tube, 9 H, area from a pseudo-Voigt fit incl. 29Si satellites. No calibration against any sample or standard.",
-        "Whole spectrum fitted as a sum of simulated metabolite spectra + smooth baseline + free unassigned singlets; each multiplet has a small fitted shift and linewidth. Concentration = mean of the cleanly resolved 'reporter' multiplets (each fitted on its own); if none, the whole-compound fit. The reporter_ppm column of Long_table gives the fitted centre (ppm) of the reporter multiplet(s) a Quantified or Overlapped value comes from.",
-        f"Clean reporter multiplet(s): SNR>={S['LOQ_SNR']}, this metabolite >={S['Q_MIN_DOMINANCE']:.0%} of the fitted signal under it, |observed-fit| <= {S['Q_MAX_MISFIT']} x its own signal, shift not at bound; either two or more reporters agreeing within x{S['MAX_REPORTER_RATIO']}, or one reporter carrying >={S['SINGLE_REPORTER_MIN_SHARE']:.0%} of the protons; no multiplet of the molecule contradicted by the data.",
+        "Whole spectrum fitted as a sum of simulated metabolite spectra + smooth baseline + free unassigned singlets; each multiplet has a small fitted shift and linewidth. Concentration = mean of the cleanly resolved 'reporter' multiplets (each fitted on its own); if none, the whole-compound fit. The reporter_ppm column of Long_table gives the fitted centre (ppm) of the reporter multiplet(s) a Quantified or Overlapped value comes from. " + ("A compound that only sits on other compounds' peaks (none of its multiplets dominant, and the amount its signal implies would put another of its multiplets clearly above the noise where the data, or the fit, show almost nothing) is left out of the fit, so it cannot take signal from the compounds that are there; its Long_table method says why. " if S["DROP_GHOSTS"] else "") + "A multiplet whose own fitted amount predicts the molecule's other multiplets clearly above the noise where they are missing is never used as a reporter. check_note in Long_table warns when a compound graded without a value is fitted on this compound's peak.",
+        f"Clean reporter multiplet(s): SNR>={S['LOQ_SNR']}, this metabolite >={S['Q_MIN_DOMINANCE']:.0%} of the fitted signal under it, |observed-fit| <= {S['Q_MAX_MISFIT']} x its own signal, shift not at bound; either two or more reporters agreeing within x{S['MAX_REPORTER_RATIO']}, or one reporter carrying >={S['SINGLE_REPORTER_MIN_SHARE']:.0%} of the protons; no multiplet of the molecule contradicted by the data; the molecule's other multiplets above LOQ (whatever their dominance) give a median value within {S['MAX_REPORTER_DISAGREE']:.0%} of the reporter value" + ("; a lone singlet reporter must be confirmed by another multiplet of the molecule within that margin (molecules with no other multiplet, such as acetate or formate, are exempt)" if S["SINGLET_NEEDS_SECOND"] else "") + ". Otherwise the value is graded Overlapped and its method says why.",
         f"SNR>={S['LOQ_SNR']} but the best multiplet is shared (dominance {S['O_MIN_DOMINANCE']:.0%}-{S['Q_MIN_DOMINANCE']:.0%}) or misfit <= {S['O_MAX_MISFIT']}. Number depends on the overlap partners: use for trends.",
         f"No multiplet of this metabolite is resolved enough to quantify on its own, but the whole-compound least-squares fit over >={S['DECONV_MIN_MULTIPLETS']} fitted multiplets is well determined (relative SE <= {S['DECONV_MAX_REL_SE']:.0%}) and sits below the data upper bound. The value is that deconvolution estimate, shown with a ~ in Report_mM. It depends on the library explaining the overlapping signals correctly, so treat it as an estimate, not a measurement.",
         "The value was set by hand in the Review step of the window (Chenomx-style: the whole simulated compound at one concentration, with a shift and linewidth chosen by the user), or refitted around a compound that was. The automatic tier and value are in the auto_tier and auto_conc_mM columns of Long_table, and every change, with who made it and when, is in Manual_edits. Report_mM marks these values with (manual). No standard error is given.",

@@ -1781,6 +1781,8 @@ class ResultsTab(QWidget):
                     it.setBackground(QBrush(QColor(TIER_COL.get(t, "#ffffff"))))
                     it.setForeground(QBrush(QColor(TIER_TXT.get(t, "#111827"))))
                 tip = f"{m}, EXPNO {s}: {t}, {r.method}"
+                if isinstance(getattr(r, "check_note", ""), str) and r.check_note:
+                    tip += f"\nCheck: {r.check_note}"
                 if (m, s) in rep_cell:
                     tip += f"\nMeasured at: {', '.join(f'{p:.3f}' for p in rep_cell[(m, s)])} ppm"
                 if t == "Manually adjusted" and "auto_tier" in r:

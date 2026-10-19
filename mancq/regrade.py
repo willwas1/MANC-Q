@@ -10,7 +10,8 @@ from . import engine as q
 
 GRADING_KEYS = ("LOD_SNR", "LOQ_SNR", "Q_MIN_DOMINANCE", "Q_MAX_MISFIT", "MAX_REPORTER_RATIO", "MAX_CONC_OVER_BOUND",
                 "SINGLE_REPORTER_MIN_SHARE", "CONTRADICT_MIN_SNR", "CONTRADICT_FRACTION", "O_MIN_DOMINANCE",
-                "O_MAX_MISFIT", "DECONV_MAX_REL_SE", "DECONV_MIN_MULTIPLETS")
+                "O_MAX_MISFIT", "DECONV_MAX_REL_SE", "DECONV_MIN_MULTIPLETS", "MAX_REPORTER_DISAGREE",
+                "SINGLET_NEEDS_SECOND")
 
 
 def restore_settings(out, grading_from_run=False):
@@ -67,7 +68,7 @@ def regrade(out, library_dir=None):
             dx = float(d["dx"])
         res = dict(grid=Grid(), yv=np.asarray(d["yv"], float), fit=np.asarray(d["fit"], float),
                    base_fit=np.asarray(d["base"], float), sigma=float(d["sigma"]), fw0=float(d["fw0"]),
-                   amp=d["amp"], se=d["se"], MP=MP)
+                   amp=d["amp"], se=d["se"], MP=MP, eta=float(d["eta"]) if "eta" in d else 0.7)
         gr, pk = q.grade(res, slib, sf, float(d["cf"]))
         gr.insert(0, "sample", smp); pk.insert(0, "sample", smp)
         gr.to_csv(os.path.join(per, f"{smp}_grades.csv"), index=False)
