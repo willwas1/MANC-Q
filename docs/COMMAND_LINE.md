@@ -15,13 +15,19 @@ Put any path that contains spaces in double quotes, for example `"C:\NMR data\Ex
 
 ## Commands
 
-Check that everything works: this makes two synthetic 600 MHz spectra of 18 metabolites at known
-concentrations (one processed, one raw FID), quantifies them, and prints the recovered values next to the true
-ones (a few minutes).
+Check that everything works: this makes synthetic 600 MHz spectra of known composition, quantifies them, and
+prints the recovered values next to the true ones (about 5 minutes). EXPNO 10 is a processed spectrum, EXPNO 11
+a raw FID of the same mixture, EXPNO 13 has creatinine and O-acetylcarnitine instead of their look-alikes
+creatine and choline, and EXPNO 14 has shifts near the limit, a small phase error and three unknown singlets.
 
 ```
 mancq demo
 ```
+
+The demo checks itself: every Quantified value must be within 10 % of the truth, every Overlapped value within
+25 %, and no compound that is not in a spectrum may be graded with a value. It ends with "Demo check passed",
+or "DEMO CHECK FAILED" and the list of what failed (then the command's exit code is 1, so scripts can tell).
+`mancq demo --quick` fits only EXPNO 10 and 13 (used by the automatic tests on GitHub).
 
 Quantify your own spectra:
 

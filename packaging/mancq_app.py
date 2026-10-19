@@ -15,11 +15,12 @@ if __name__ == "__main__":
         from mancq.demo import demo
         out = os.path.join(tempfile.gettempdir(), "MANC-Q selftest")
         chk = demo(out)
+        fails = chk.attrs["failures"]
         good = chk[chk.tier.isin(["Quantified", "Overlapped (semi-quantitative)"])]
-        msg = (f"MANC-Q self-test: median recovered/true = {good.ratio.median():.3f} over {len(good)} values "
-               f"(processed spectrum and raw FID)")
+        msg = (f"MANC-Q self-test: median recovered/true = {good.ratio.median():.3f} over {len(good)} values; "
+               + ("all checks passed" if not fails else f"{len(fails)} checks FAILED:\n" + "\n".join(fails)))
         open(os.path.join(out, "selftest.txt"), "w").write(msg + "\n")
         print(msg)
-        sys.exit(0 if abs(good.ratio.median() - 1) < 0.05 else 1)
+        sys.exit(1 if fails else 0)
     from mancq.gui.app import main
     sys.exit(main())

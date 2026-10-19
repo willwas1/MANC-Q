@@ -14,6 +14,19 @@ TRUTH_MM = {  # concentrations in the NMR tube
     "L-Methionine": 0.2, "L-Histidine": 0.2,
 }
 REF_MM = 0.5
+# harder cases: neighbours of absent compounds present (creatinine without creatine, O-acetylcarnitine without
+# choline), and a spectrum with shifts near the limit, a small phase error and a few unknown singlets
+TRUTH_SWAPPED = dict({k: v for k, v in TRUTH_MM.items() if k not in ("Creatine", "Choline")},
+                     **{"Creatinine": 0.3, "O-Acetylcarnitine": 0.2})
+UNKNOWN_SINGLETS = [(2.80, 0.3), (5.95, 0.2), (8.55, 0.15)]       # (ppm, mM of one proton): not in the library
+CASES = {"10": (TRUTH_MM, "processed spectrum"),
+         "11": (TRUTH_MM, "raw FID, processed by MANC-Q"),
+         "13": (TRUTH_SWAPPED, "creatinine without creatine, O-acetylcarnitine without choline"),
+         "14": (TRUTH_MM, "shifts 5.5-6.5 Hz from the library (all but the offset anchors), 1.5 degree phase error, "
+                "3 unknown singlets")}
+QUICK = ("10", "13")
+LIMITS = {"Quantified": 0.10, "Overlapped (semi-quantitative)": 0.25}     # largest allowed |recovered/true - 1|
+NO_VALUE = ("Not detected", "Upper bound only", "Not measurable (region ignored)")
 
 
 def imaginary_part(y):
@@ -44,7 +57,13 @@ def write_bruker(folder, ppm0, sw_hz, sf, y, title):
     open(os.path.join(pdir, "title"), "w").write(title)
 
 
-def make_spectrum(sf=600.13, seed=1, lw_hz=1.0, eta=0.7, cache_dir=".mancq_cache"):
+def make_spectrum(sf=600.13, seed=1, lw_hz=1.0, eta=0.7, cache_dir=".mancq_cache", truth=None, near_limit=False,
+                  phase_deg=0.0, singlets=()):
+    """A processed spectrum of `truth` (default TRUTH_MM). near_limit: every compound (except pH-sensitive ones)
+    moved 5.5-6.5 Hz from its library position, close to the 8 Hz limit (the anchor compounds used to find
+    the library offset are not moved, as their shifts set the offset itself); phase_deg: a zero-order phase error
+    (slightly asymmetric lines); singlets: [(ppm, mM of one proton)] not in the library."""
+    truth = TRUTH_MM if truth is None else truth
     rng = np.random.default_rng(seed)
     si, sw_ppm, ppm0 = 65536, 14.0, 11.5
     ppm = ppm0 - np.arange(si) * sw_ppm / si
@@ -59,11 +78,18 @@ def make_spectrum(sf=600.13, seed=1, lw_hz=1.0, eta=0.7, cache_dir=".mancq_cache
     y += tsp_area * (1 - fsi) * q.pv(x, 0.0, fw, eta)
     y += tsp_area * fsi / 2 * (q.pv(x, -jsi / 2 / sf, fw, eta) + q.pv(x, jsi / 2 / sf, fw, eta))
     per_proton = tsp_area / 9 / REF_MM                # area of one proton at 1 mM
-    for met, mm in TRUTH_MM.items():
+    for met, mm in truth.items():
         c = lib[names.index(met)]
         d = rng.uniform(-2, 2) / sf                   # small compound-level shift, as in real samples
+        if near_limit and not c["titratable"] and met not in q.S["OFFSET_ANCHORS"]:
+            d = rng.choice([-1, 1]) * rng.uniform(5.5, 6.5) / sf
         for m in c["mults"]:
             y += mm * per_proton * q.mcol(x, m["ppm"], m["inten"], d, fw * rng.uniform(0.95, 1.2), eta)
+    for pos, mm in singlets:
+        y += mm * per_proton * q.pv(x, pos, fw * 1.1, eta)
+    if phase_deg:
+        yi = imaginary_part(y[::-1])[::-1]
+        y = y * np.cos(np.deg2rad(phase_deg)) + yi * np.sin(np.deg2rad(phase_deg))
     y += 2e4 * np.sin(x / 3.0) + 1e4                  # gentle baseline
     ref_height = y[np.abs(x) < 0.01].max()
     y += rng.normal(0, 1, si) * ref_height / 5000   # reference signal-to-noise about 5000
@@ -159,38 +185,71 @@ def write_tocsy(folder, z, sf, sw_ppm=12.0, ppm0=10.5, title=""):
     open(os.path.join(pdir, "title"), "w").write(title)
 
 
-def demo(out="mancq_demo", sf=600.13):
+def check(G, samples):
+    """Compare the results with the truth. Returns (table of the true compounds, list of failures): a Quantified
+    value more than 10 % from the truth, an Overlapped value more than 25 % from it, or a compound that is not in
+    the spectrum graded with a value."""
+    rows, fails = [], []
+    for smp in samples:
+        truth, _ = CASES[smp]
+        g = G[G["sample"] == smp].set_index("metabolite")
+        for met, t in g.tier.items():
+            v = g.at[met, "conc_mM"]
+            if met in truth:
+                r = v / truth[met] if np.isfinite(v) else np.nan
+                rows.append(dict(sample=smp, metabolite=met, true_mM=truth[met], fitted_mM=v, tier=t, ratio=r))
+                lim = LIMITS.get(t)
+                if lim is not None and not abs(r - 1) <= lim:
+                    fails.append(f"EXPNO {smp}: {met} {t} {v:.3g} mM, true {truth[met]:g} mM "
+                                 f"(ratio {r:.2f}, allowed 1 +/- {lim:.2f})")
+            elif t not in NO_VALUE:
+                fails.append(f"EXPNO {smp}: {met} is not in this spectrum but was graded {t} ({v:.3g} mM)")
+    return pd.DataFrame(rows).set_index("metabolite"), fails
+
+
+def demo(out="mancq_demo", sf=600.13, quick=False):
+    """Make the synthetic spectra, quantify them and check the results against the truth. Returns the check
+    table; its attrs["failures"] lists every check that failed (empty if all passed). quick: only EXPNO 10
+    and 13 (for automatic tests)."""
     spec_dir = os.path.join(out, "spectra")
     res_dir = os.path.join(out, "results")
-    print(f"Writing two synthetic {sf:.2f} MHz spectra of {len(TRUTH_MM)} metabolites to {spec_dir}:\n"
-          f"  EXPNO 10 processed (1r), EXPNO 11 raw FID only (processed by MANC-Q), EXPNO 12 a 2D TOCSY of 10 ...")
-    write_demo(spec_dir, sf, cache_dir=os.path.join(out, "results", "_cache"))
-    q.run(spec_dir, res_dir, REF_MM, dilution=1.0, N_WORKERS=2, existing="overwrite")
+    samples = list(QUICK if quick else CASES)
+    print(f"Writing synthetic {sf:.2f} MHz spectra to {spec_dir}:\n" +
+          "".join(f"  EXPNO {s}: {CASES[s][1]}\n" for s in samples) +
+          ("" if quick else "  EXPNO 12: a 2D TOCSY of EXPNO 10\n"))
+    write_demo(spec_dir, sf, cache_dir=os.path.join(out, "results", "_cache"), extra=True)
+    q.run(spec_dir, res_dir, REF_MM, dilution=1.0, N_WORKERS=2, existing="overwrite", SAMPLES=samples)
     g = pd.read_csv(os.path.join(res_dir, "concentrations_long.csv"), dtype={"sample": str})
-    rows = []
-    for smp in ("10", "11"):
-        h = g[(g["sample"] == smp) & g.metabolite.isin(TRUTH_MM)].set_index("metabolite")
-        chk = pd.DataFrame({"true_mM": pd.Series(TRUTH_MM), "fitted_mM": h.conc_mM, "tier": h.tier})
-        chk["ratio"] = chk.fitted_mM / chk.true_mM
-        chk.insert(0, "sample", smp)
-        rows.append(chk)
-    chk = pd.concat(rows)
+    chk, fails = check(g, samples)
     chk.round(3).to_csv(os.path.join(out, "demo_check.csv"), index_label="metabolite")
-    good_tiers = ["Quantified", "Overlapped (semi-quantitative)"]
-    for smp, label in (("10", "processed spectrum"), ("11", "raw FID")):
+    good_tiers = list(LIMITS)
+    for smp in samples:
         c = chk[chk["sample"] == smp].drop(columns="sample")
-        print(f"\nEXPNO {smp} ({label}): recovered vs true (tube mM)")
+        print(f"\nEXPNO {smp} ({CASES[smp][1]}): recovered vs true (tube mM)")
         print(c.round(3).to_string())
         print(f"Median ratio over graded compounds: {c[c.tier.isin(good_tiers)].ratio.median():.3f}")
     print(f"\nResults in {res_dir}; comparison in {os.path.join(out, 'demo_check.csv')}")
+    if fails:
+        print(f"\nDEMO CHECK FAILED ({len(fails)}):\n" + "\n".join(f"  * {f}" for f in fails))
+    else:
+        print("\nDemo check passed: every Quantified value within 10 % of the truth, every Overlapped value within "
+              "25 %, and no compound that is not in a spectrum graded with a value.")
+    chk.attrs["failures"] = fails
     return chk
 
 
-def write_demo(spec_dir, sf=600.13, cache_dir=".mancq_cache"):
-    """Write the demo experiments: 10 (processed), 11 (raw FID only) and 12 (a TOCSY of the same sample as 10)."""
+def write_demo(spec_dir, sf=600.13, cache_dir=".mancq_cache", extra=False):
+    """Write the demo experiments: 10 (processed), 11 (raw FID only) and 12 (a TOCSY of the same sample as 10);
+    with extra, also the harder cases 13 and 14 (see CASES)."""
     ppm0, sw_hz, y = make_spectrum(sf, cache_dir=cache_dir)
     write_bruker(os.path.join(spec_dir, "10"), ppm0, sw_hz, sf, y, "MANC-Q synthetic demo (processed)")
     fid, fsw, o1 = make_fid(sf, cache_dir=cache_dir)
     write_fid(os.path.join(spec_dir, "11"), fid, fsw, sf, o1, "MANC-Q synthetic demo (raw FID)")
     z, _, _ = make_tocsy(sf)
     write_tocsy(os.path.join(spec_dir, "12"), z, sf, title="MANC-Q synthetic demo (processed)")
+    if extra:
+        ppm0, sw_hz, y = make_spectrum(sf, seed=4, cache_dir=cache_dir, truth=TRUTH_SWAPPED)
+        write_bruker(os.path.join(spec_dir, "13"), ppm0, sw_hz, sf, y, "MANC-Q synthetic test: neighbours swapped")
+        ppm0, sw_hz, y = make_spectrum(sf, seed=5, cache_dir=cache_dir, near_limit=True, phase_deg=1.5,
+                                       singlets=UNKNOWN_SINGLETS)
+        write_bruker(os.path.join(spec_dir, "14"), ppm0, sw_hz, sf, y, "MANC-Q synthetic test: harder spectrum")

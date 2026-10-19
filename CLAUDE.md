@@ -21,8 +21,8 @@ em dashes in anything you write for him.
 ## Layout
 
 * `mancq/engine.py` fitting and grading (SETTINGS block at the top); `spinsim.py` spin simulation;
-  `fidproc.py` raw FID processing; `regrade.py`; `results.py`; `demo.py` synthetic demo (one processed
-  spectrum, one raw FID); `shortcut.py` Windows desktop shortcut; `__main__.py` command line
+  `fidproc.py` raw FID processing; `regrade.py`; `results.py`; `demo.py` synthetic demo and its checks
+  (EXPNO 10, 11, 13, 14); `shortcut.py` Windows desktop shortcut; `__main__.py` command line
   (`mancq` with no arguments opens the window).
 * `mancq/gui/app.py` PySide6 window (8 steps: Spectra, Process spectra, Regions, Settings, Run, Results,
   Review, Figures); `gui/runner.py` runs the fit in a separate process; `gui/figures_tab.py` the Figures
@@ -30,8 +30,8 @@ em dashes in anything you write for him.
   Anaconda's Pillow crashes on compressed TIFFs).
 * `mancq/shifttable.py` chemical shift assignment table (chemical_shift_assignments.xlsx), written with
   every results update.
-* `tests/`: checks on synthetic data only (`python tests/test_ph_estimate.py`, `python tests/test_figures.py`,
-  `python tests/test_shift_table.py`).
+* `tests/`: checks on synthetic data only, run with `python -m pytest tests` (each file also runs on its own:
+  pH estimate, figures, shift table, overwrite warning, subset rerun, results tables).
 * `mancq/library/`: `compounds.csv` (149 compounds: 123 GISSMO, 25 CASMDB peak lists, 1 literature spin
   system), `gissmo_spin_systems.txt`, `other_spin_systems.txt`, `peaklists.csv`, `peaklists_manifest.csv`.
 * `MANC-Q.bat` double-click launcher (downloads uv + private Python into `.runtime`); `constraints.txt` exact
@@ -40,8 +40,10 @@ em dashes in anything you write for him.
 
 ## Checking a change
 
-* `python -m mancq demo <folder>`: fits the synthetic spectra; median recovered/true should be about 1.00 for
-  both EXPNO 10 (processed) and EXPNO 11 (raw FID). Takes a few minutes.
+* `python -m mancq demo <folder>`: fits the synthetic spectra (10 processed, 11 raw FID, 13 look-alike neighbours,
+  14 shifts near the limit + phase error + unknown singlets) and checks itself; it must end with "Demo check
+  passed" (exit code 0). About 5 minutes. `--quick` fits only 10 and 13.
+* `python -m pytest tests` (also run by `.github/workflows/tests.yml` on every push).
 * `python -m mancq regrade <results folder>` should reproduce the same tiers and values.
 * For window changes, open it (`python -m mancq`) and look at every step, including with no raw FIDs.
 

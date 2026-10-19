@@ -56,6 +56,7 @@ def main(argv=None):
     d = sub.add_parser("demo", help="make synthetic spectra (one processed, one raw FID) of known composition and quantify them")
     d.add_argument("output", nargs="?", default="mancq_demo", help="demo folder (default ./mancq_demo)")
     d.add_argument("--field", type=float, default=600.13, help="spectrometer frequency to simulate, MHz")
+    d.add_argument("--quick", action="store_true", help="only EXPNO 10 and 13 (faster; used by the automatic tests)")
 
     sub.add_parser("gui", help="open the window (the same as running mancq with no arguments)")
 
@@ -105,7 +106,8 @@ def main(argv=None):
             return 2
     elif a.cmd == "demo":
         from .demo import demo
-        demo(a.output, a.field)
+        chk = demo(a.output, a.field, quick=a.quick)
+        return 1 if chk.attrs["failures"] else 0
     elif a.cmd == "gui":
         try:
             import PySide6  # noqa: F401

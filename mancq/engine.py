@@ -87,9 +87,10 @@ SETTINGS = dict(
     DROP_GHOSTS=True,             # leave out of the fit a compound that only sits on other compounds' peaks: none of its
                                   # multiplets is dominant, and the amount its signal implies would put another of its
                                   # multiplets above CONTRADICT_MIN_SNR x noise where the data show (almost) nothing
-    GHOST_MAX_DOMINANCE=0.5,      # ... "dominant" = at least this share of the fitted signal under the multiplet
-    GHOST_SHIFT_HZ=5.0,           # ... or (not for pH-sensitive compounds) its signal is this far from the library
-                                  # position and the other multiplets it implies get almost nothing in the fit
+    GHOST_MAX_DOMINANCE=0.6,      # ... "dominant" = at least this share of the fitted signal under the multiplet
+    GHOST_SHIFT_HZ=5.0,           # ... or its signal is this far from the library position (GHOST_SHIFT_TITRATABLE_HZ
+    GHOST_SHIFT_TITRATABLE_HZ=15.0,  # for pH-sensitive compounds) and the other multiplets it implies get almost
+                                  # nothing in the fit. Looked for from the second iteration on, once shifts have settled
 
     # sample pH estimate from the histidine imidazole singlets (H2 near 7.8 ppm, H4 near 7.05 ppm). It is the pH in
     # the NMR tube at acquisition, an ESTIMATE: trends are reliable, absolute pH about +/-0.2 with these constants
@@ -117,6 +118,8 @@ SETTINGS = dict(
     CONTRADICT_MIN_SNR=10, CONTRADICT_FRACTION=0.3,   # predicted multiplet >10 sigma but <30% observed -> reject
     O_MIN_DOMINANCE=0.25, O_MAX_MISFIT=0.50,
     DECONV_MAX_REL_SE=0.35, DECONV_MIN_MULTIPLETS=2,
+    DECONV_MAX_MISFIT=0.5,        # a multiplet counts towards DECONV_MIN_MULTIPLETS only if its own signal is at least
+                                  # twice the local misfit (not a sliver under a neighbour's imperfect fit)
     MAX_REPORTER_DISAGREE=0.20,   # Quantified only if the molecule's other multiplets (above LOQ, any dominance) give a
                                   # median value within 20% of the reporter value; otherwise Overlapped
     SINGLET_NEEDS_SECOND=True,    # a lone singlet reporter is Quantified only if another multiplet of the molecule agrees
@@ -159,7 +162,7 @@ plt = _plt
 
 from .spinsim import simulate_spin_system, merge_sticks
 
-__version__ = "1.9.0"
+__version__ = "1.9.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -720,8 +723,13 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
                     if tag in his_win and lo_ <= m["centre"] <= hi_:
                         tgt, hw = his_win[tag]
                         win = (tgt - m["centre"] - hw / sf, tgt - m["centre"] + hw / sf)
-            MP.append(dict(k=k, j=j, p=m["ppm"], it=m["inten"], nprot=m["nprot"], base=base, win=win,
-                           d=base, dlo=base - DLT[k] if win is None else win[0], dhi=base + DLT[k] if win is None else win[1],
+            # with a pH estimate, the side-chain multiplets of histidine need only the usual pH-sensitive freedom
+            # (the large freedom in the library is for H2/H4); otherwise a doublet of doublets can slip by one coupling
+            dlt = DLT[k]
+            if c["name"] == "L-Histidine" and his_win and win is None:
+                dlt = min(dlt, S["MULTIPLET_SHIFT_TITRATABLE_HZ"] / sf)
+            MP.append(dict(k=k, j=j, p=m["ppm"], it=m["inten"], nprot=m["nprot"], base=base, win=win, dlt=dlt,
+                           d=base, dlo=base - dlt if win is None else win[0], dhi=base + dlt if win is None else win[1],
                            wf=c.get("wf0", 1.0), wlo=c.get("wlo", 0.5), whi=c.get("whi", 4.0),
                            titr=c["titratable"], local_amp=np.nan, local_se=np.nan,
                            loc_dom=0.0, loc_mis=np.inf, loc_h=0.0))
@@ -738,7 +746,7 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
                 M[:, i] = mcol(x, m["p"], m["it"], m["d"], fw0 * m["wf"], eta)
         return M
 
-    def find_ghosts(coef):
+    def find_ghosts(coef, settled):
         """Compounds that only sit on other compounds' peaks (see DROP_GHOSTS); returns how many were dropped."""
         base_now = B @ coef[nM + len(unknown):]
         n = 0
@@ -764,7 +772,7 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
                 # moved well away from its library position, and the multiplets it implies get nothing in the fit
                 # (they may sit under another compound's peaks, so the data alone cannot show they are missing)
                 shift_hz = abs(m["d"] - m["base"]) * sf
-                if lib[k]["titratable"] or shift_hz < S["GHOST_SHIFT_HZ"]:
+                if not settled or shift_hz < S["GHOST_SHIFT_TITRATABLE_HZ" if lib[k]["titratable"] else "GHOST_SHIFT_HZ"]:
                     continue
                 empty = [o["j"] + 1 for o in mps if o is not m and (o["nprot"] >= 0.3 or o["nprot"] / nprot >= 0.1)
                          and _excluded_fraction(o) < 0.5
@@ -956,8 +964,8 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
             if (lib[k]["source"] == "polymer" and lib[k].get("dmax_hz", 3.0) <= 3.0) or not MPk[k] or k in dropped:
                 continue
             ii = MPk[k]
-            spans = [(MP[i]["p"].min() + MP[i]["base"] - DMAX[k] - DLT[k] - HALF_WIN / 2,
-                      MP[i]["p"].max() + MP[i]["base"] + DMAX[k] + DLT[k] + HALF_WIN / 2) for i in ii]
+            spans = [(MP[i]["p"].min() + MP[i]["base"] - DMAX[k] - MP[i]["dlt"] - HALF_WIN / 2,
+                      MP[i]["p"].max() + MP[i]["base"] + DMAX[k] + MP[i]["dlt"] + HALF_WIN / 2) for i in ii]
             sup = np.unique(np.concatenate([np.arange(np.searchsorted(x, a_), np.searchsorted(x, b_)) for a_, b_ in spans]))
             if sup.size == 0:
                 continue
@@ -1001,13 +1009,13 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
                 fit[sup] = fit[sup] - own + best[2] * col
             # pH-sensitive compounds: each multiplet may move further on its own (multiplets held near a
             # measured peak move only inside their own window)
-            if DLT[k] > 2.0 / sf or any(MP[i]["win"] for i in ii):
+            if any(MP[i]["dlt"] > 2.0 / sf or MP[i]["win"] for i in ii):
                 for i in ii:
                     m = MP[i]
                     if m["win"]:
                         d_c, hw_ = 0.5 * (m["win"][0] + m["win"][1]), 0.5 * (m["win"][1] - m["win"][0])
-                    elif DLT[k] > 2.0 / sf:
-                        d_c, hw_ = m["base"] + Dk[k], DLT[k]
+                    elif m["dlt"] > 2.0 / sf:
+                        d_c, hw_ = m["base"] + Dk[k], m["dlt"]
                     else:
                         continue
                     lo_ = np.searchsorted(x, m["p"].min() + d_c - hw_ - HALF_WIN / 2)
@@ -1035,8 +1043,8 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
                         fit[lo_:hi_] = fit[lo_:hi_] - own2 + bb[3] * bb[2]
         for m in MP:
             k = m["k"]
-            m["dlo"] = m["base"] + Dk[k] - DLT[k] if not m["win"] else m["win"][0]
-            m["dhi"] = m["base"] + Dk[k] + DLT[k] if not m["win"] else m["win"][1]
+            m["dlo"] = m["base"] + Dk[k] - m["dlt"] if not m["win"] else m["win"][0]
+            m["dhi"] = m["base"] + Dk[k] + m["dlt"] if not m["win"] else m["win"][1]
             m["d"] = float(np.clip(m["d"], m["dlo"], m["dhi"]))
         return moved
 
@@ -1066,7 +1074,8 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
         M = mult_columns()
         coef, fit, A = global_solve(M, U)
         log(f"   iter {it+1}: {moved} compounds re-positioned (chi2/n={c1:.2f}); {nroi} ROIs refined -> chi2/n={chi(fit):.2f}  ({time.time()-t0:.0f}s)")
-        if S["DROP_GHOSTS"] and find_ghosts(coef):
+        # missing multiplets in the data: from the first iteration; nothing in the fit: once shifts have settled
+        if S["DROP_GHOSTS"] and find_ghosts(coef, settled=it >= 1):
             M = mult_columns()
             coef, fit, A = global_solve(M, U)
 
@@ -1345,7 +1354,8 @@ def grade(res, lib, sf, cf):
         else:
             wc = a * cf if a > 0 else 0.0
             wc_se = res["se"][k] * cf if np.isfinite(res["se"][k]) else np.nan
-            n_fit = sum(1 for m in mps if m.get("loc_h", 0) > S["LOQ_SNR"] * sig and id(m) not in self_contra)
+            n_fit = sum(1 for m in mps if m.get("loc_h", 0) > S["LOQ_SNR"] * sig and id(m) not in self_contra
+                        and m.get("loc_mis", np.inf) <= S["DECONV_MAX_MISFIT"])
             if (np.isfinite(ub) and np.isfinite(wc_se) and wc > lod and wc <= ub
                     and n_fit >= S["DECONV_MIN_MULTIPLETS"]
                     and wc_se <= S["DECONV_MAX_REL_SE"] * wc):
@@ -2048,7 +2058,7 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         "Whole spectrum fitted as a sum of simulated metabolite spectra + smooth baseline + free unassigned singlets; each multiplet has a small fitted shift and linewidth. Concentration = mean of the cleanly resolved 'reporter' multiplets (each fitted on its own); if none, the whole-compound fit. The reporter_ppm column of Long_table gives the fitted centre (ppm) of the reporter multiplet(s) a Quantified or Overlapped value comes from. " + ("A compound that only sits on other compounds' peaks (none of its multiplets dominant, and the amount its signal implies would put another of its multiplets clearly above the noise where the data, or the fit, show almost nothing) is left out of the fit, so it cannot take signal from the compounds that are there; its Long_table method says why. " if S["DROP_GHOSTS"] else "") + "A multiplet whose own fitted amount predicts the molecule's other multiplets clearly above the noise where they are missing is never used as a reporter. check_note in Long_table warns when a compound graded without a value is fitted on this compound's peak.",
         f"Clean reporter multiplet(s): SNR>={S['LOQ_SNR']}, this metabolite >={S['Q_MIN_DOMINANCE']:.0%} of the fitted signal under it, |observed-fit| <= {S['Q_MAX_MISFIT']} x its own signal, shift not at bound; either two or more reporters agreeing within x{S['MAX_REPORTER_RATIO']}, or one reporter carrying >={S['SINGLE_REPORTER_MIN_SHARE']:.0%} of the protons; no multiplet of the molecule contradicted by the data; the molecule's other multiplets above LOQ (whatever their dominance) give a median value within {S['MAX_REPORTER_DISAGREE']:.0%} of the reporter value" + ("; a lone singlet reporter must be confirmed by another multiplet of the molecule within that margin (molecules with no other multiplet, such as acetate or formate, are exempt)" if S["SINGLET_NEEDS_SECOND"] else "") + ". Otherwise the value is graded Overlapped and its method says why.",
         f"SNR>={S['LOQ_SNR']} but the best multiplet is shared (dominance {S['O_MIN_DOMINANCE']:.0%}-{S['Q_MIN_DOMINANCE']:.0%}) or misfit <= {S['O_MAX_MISFIT']}. Number depends on the overlap partners: use for trends.",
-        f"No multiplet of this metabolite is resolved enough to quantify on its own, but the whole-compound least-squares fit over >={S['DECONV_MIN_MULTIPLETS']} fitted multiplets is well determined (relative SE <= {S['DECONV_MAX_REL_SE']:.0%}) and sits below the data upper bound. The value is that deconvolution estimate, shown with a ~ in Report_mM. It depends on the library explaining the overlapping signals correctly, so treat it as an estimate, not a measurement.",
+        f"No multiplet of this metabolite is resolved enough to quantify on its own, but the whole-compound least-squares fit over >={S['DECONV_MIN_MULTIPLETS']} fitted multiplets (each above LOQ, with its own signal at least {1 / S['DECONV_MAX_MISFIT']:g} x the local misfit) is well determined (relative SE <= {S['DECONV_MAX_REL_SE']:.0%}) and sits below the data upper bound. The value is that deconvolution estimate, shown with a ~ in Report_mM. It depends on the library explaining the overlapping signals correctly, so treat it as an estimate, not a measurement.",
         "The value was set by hand in the Review step of the window (Chenomx-style: the whole simulated compound at one concentration, with a shift and linewidth chosen by the user), or refitted around a compound that was. The automatic tier and value are in the auto_tier and auto_conc_mM columns of Long_table, and every change, with who made it and when, is in Manual_edits. Report_mM marks these values with (manual). No standard error is given.",
         f"Signal is present where the metabolite would appear but it cannot be attributed to it with confidence (no usable reporter, or a multiplet the library predicts >{S['CONTRADICT_MIN_SNR']}x noise is missing). The largest concentration the data allow (upper bound) is in Report_mM as <=value and in upper_bound_mM of Long_table; conc_mM and Concentration_mM_all are blank, and the bound is never included in mean_conc_mM.",
         "Below the detection limit; Report_mM shows <LOD in mM. 'n/m' = not measurable: every peak of the metabolite lies in a region left out of the fit. " + NOT_DETECTED_NOTE,

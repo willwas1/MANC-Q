@@ -2,6 +2,31 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 1.9.1 (19 October 2026)
+
+* **The demo now checks itself and fails loudly.** `mancq demo` ends with "Demo check passed" or "DEMO CHECK
+  FAILED" and a list: every Quantified value must be within 10 % of the truth, every Overlapped value within
+  25 %, and no compound that is not in a spectrum may be graded with a value. The exit code is 1 on failure,
+  and the Windows self-test uses the same checks. `mancq demo --quick` fits only EXPNO 10 and 13.
+* **Two harder synthetic spectra.** EXPNO 13 has creatinine and O-acetylcarnitine without their look-alikes
+  creatine and choline. EXPNO 14 has shifts 5.5 to 6.5 Hz from the library, a 1.5 degree phase error and
+  three unknown singlets.
+* **Fixes these harder cases found:**
+  * Ghost compounds are now looked for in two stages. Missing multiplets in the data are checked from the
+    first iteration. "Nothing in the fit" is checked once shifts have settled (from the second iteration),
+    because otherwise methionine, displaced 6 Hz, was wrongly dropped. A pH-sensitive compound now counts
+    as a ghost too when it has moved at least `GHOST_SHIFT_TITRATABLE_HZ` (15 Hz) and the fit gives its other
+    multiplets nothing (cystine and cysteine had slid 26 to 33 Hz onto histidine). `GHOST_MAX_DOMINANCE` is
+    now 0.6, the same as for a clean reporter.
+  * With a pH estimate, histidine's side-chain multiplets get the usual pH-sensitive freedom (6 Hz) instead
+    of the 60 Hz meant for its imidazole H2/H4 (which are held at their measured peaks anyway). Before, its
+    CH2 could slip by one coupling (13 Hz) and leave two lines for dimethylsulfone to take.
+  * Deconvolution estimate: a multiplet now counts only if its own signal is at least twice the local
+    misfit (`DECONV_MAX_MISFIT`), so slivers under a neighbour's imperfect fit no longer make an estimate.
+* **Automatic tests on GitHub** (`.github/workflows/tests.yml`) on every push and pull request: all of
+  `tests/` (now run with `python -m pytest tests`) and the quick demo. New check
+  `tests/test_subset_rerun.py`.
+
 ## 1.9.0 (19 October 2026)
 
 **This version changes tiers and some values. Rerun any data you plan to publish**, in particular anything

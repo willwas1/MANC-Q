@@ -277,8 +277,10 @@ positions to keep histidine on the right peaks in the fit (setting `PH_PLACE_HIS
   samples. Histidine is placed from its own measured peaks when the pH can be estimated (from version 1.4).
 * Compounds sharing an identical singlet (for example the N(CH₃)₃ group of choline, phosphocholine, betaine,
   acetylcholine and carnitine near 3.2 ppm, or creatine and creatinine near 3.03 ppm) cannot always be separated.
-  In the synthetic demo one or two singlet compounds can read 10 to 30 % low while still graded Quantified,
-  because a look-alike compound takes part of the singlet. Check the overlays for singlet-only compounds.
+  From version 1.9 a library compound that only sits on other compounds' peaks, with its own other multiplets
+  missing, is left out of the fit, so it no longer takes part of the singlet (in the synthetic demo this was
+  what made choline and creatine read 5 to 20 % low). A compound whose only signal is a shared singlet can still
+  be mistaken for its look-alike: check the overlays for singlet-only compounds.
 * Crowded regions (branched-chain amino acid methyls, 2.0 to 2.5 ppm) are handled, but values there are more
   often Overlapped than Quantified.
 * Phasing matters. The same FIDs processed by MANC-Q (automatic phasing) and by TopSpin gave the same

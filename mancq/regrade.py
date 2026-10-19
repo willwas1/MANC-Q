@@ -11,7 +11,7 @@ from . import engine as q
 GRADING_KEYS = ("LOD_SNR", "LOQ_SNR", "Q_MIN_DOMINANCE", "Q_MAX_MISFIT", "MAX_REPORTER_RATIO", "MAX_CONC_OVER_BOUND",
                 "SINGLE_REPORTER_MIN_SHARE", "CONTRADICT_MIN_SNR", "CONTRADICT_FRACTION", "O_MIN_DOMINANCE",
                 "O_MAX_MISFIT", "DECONV_MAX_REL_SE", "DECONV_MIN_MULTIPLETS", "MAX_REPORTER_DISAGREE",
-                "SINGLET_NEEDS_SECOND")
+                "SINGLET_NEEDS_SECOND", "DECONV_MAX_MISFIT")
 
 
 def restore_settings(out, grading_from_run=False):
