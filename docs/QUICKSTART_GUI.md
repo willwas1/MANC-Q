@@ -65,6 +65,9 @@ The purple box tells you which metabolites lose signal in the selected region.
 
 Enter the **reference concentration in the tube** (the calculator converts % w/v), the **dilution** from your
 original sample to the tube (or "No dilution" for tube concentrations), and check the results folder.
+For different dilutions per sample, type them in the table, or click **Load from a file...** (a CSV or Excel
+file with the EXPNO in the first column and the dilution in the second) or copy the two columns in Excel and
+click **Paste from Excel**. MANC-Q tells you which spectra got no dilution and which rows matched no spectrum.
 **CPU cores to use** sets how many spectra are fitted at the same time (one per core; the default is all but
 one). Fewer cores leave the PC free for other work; more cores only help when there are several spectra. With
 **Tell me when a run finishes** ticked, Windows shows a notification and plays a sound at the end of a run.
@@ -110,6 +113,13 @@ detect, or a peak MANC-Q could not resolve in that spectrum. It is not proof tha
 Upper bounds are not measurements, so they are blank in the workbook's Concentration_mM_all sheet and in
 `concentrations_long.csv` (the bound is in Report_mM as `<=value` and in the `upper_bound_mM` column), and they
 are never included in the means on the Summary sheet.
+
+**Quality of each spectrum.** Above each column, `QC: check` (amber) or `QC: poor` (red) marks a spectrum
+worth a look; hover over the column title for the reasons: a broad TSP line (shimming), a TSP line much
+broader than the metabolites (TSP bound to protein, which makes every value too high), a poor fit, little of
+the signal explained, many unassigned singlets, a residual phase error (re-phase it in step 2), a short
+relaxation delay (D1 + AQ under 10 s), or a histidine pH warning. The same is in the qc_flag and qc_reason
+columns of the QC sheet, with the acquisition parameters (D1, AQ, NS, RG, pulse programme, temperature, P1).
 
 Click any value to see the fit it came from; double-click it (or click **Review and adjust this fit**) to
 open it in step 7. **Open Excel workbook** gives every table; **Export for GraphPad** writes samples x

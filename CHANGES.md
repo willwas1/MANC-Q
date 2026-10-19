@@ -2,6 +2,32 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 1.9.2 (19 October 2026)
+
+* **A quality flag for every spectrum.** `qc_flag` (ok / check / poor) and `qc_reason` in the QC sheet, and
+  in the Results step as `QC: check` (amber) or `QC: poor` (red) above the column, with the reasons when you
+  hover over it. It looks at the TSP linewidth, the fit (chi2), the share of signal explained, unassigned
+  singlets, the histidine pH flag, the residual phase error, the relaxation delay and the noise estimate.
+  Thresholds are settings (`QC_...`).
+* **Acquisition parameters** from acqus in the QC sheet: D1, AQ, NS, RG, pulse programme, temperature and
+  P1. A warning if D1 + AQ is under 10 s (signals with long T1 may read low).
+* **TSP bound to protein:** a warning when the TSP line is much broader (1.5 x) than the metabolites
+  (`metabolite_fwhm_Hz`), because every concentration is then too high.
+* **Residual phase error:** the TSP fit now includes a small dispersive part, and `TSP_phase_deg` gives the
+  size of the phase error, so you know which spectra to re-phase (the demo's 1.5 degree error reads 1.6).
+* **Dilutions:** a warning for every spectrum without a dilution and every dilution with no spectrum. The
+  dilution file may now be CSV or Excel with headers and "EXPNO 10" or "10.0" style names. On the Settings
+  step, **Load from a file...** and **Paste from Excel** fill the per-sample table.
+* **Noise:** if the spectrum has no signal-free region, MANC-Q warns and estimates the noise from
+  point-to-point differences, instead of from the first 2000 points (which could include TSP).
+* **Plain messages** for common problems: a 2D experiment, no processed spectrum with this processing
+  number (with the ones that exist), a missing procs or 1r file, no TSP/DSS near 0 ppm, an EXPNO that is
+  not in the folder.
+* Deconvolution estimate: a multiplet now counts only if the compound is at least 10 % of the fitted signal
+  under it (`DECONV_MIN_DOMINANCE`). A slight change in the fit had made a proline sliver under glucose
+  into an estimate.
+* New check `tests/test_qc.py`.
+
 ## 1.9.1 (19 October 2026)
 
 * **The demo now checks itself and fails loudly.** `mancq demo` ends with "Demo check passed" or "DEMO CHECK

@@ -1289,6 +1289,12 @@ class SettingsTab(QWidget):
         self.dtable.verticalHeader().setVisible(False); self.dtable.setMaximumHeight(140)
         self.dtable.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         g2l.addWidget(self.dtable)
+        hd = QHBoxLayout()
+        bld = QPushButton("Load from a file..."); bld.clicked.connect(self.load_dilutions)
+        bld.setToolTip("A CSV or Excel file: EXPNO (or sample) in the first column, dilution in the second")
+        bpd = QPushButton("Paste from Excel"); bpd.clicked.connect(self.paste_dilutions)
+        bpd.setToolTip("Copy two columns in Excel (EXPNO, dilution), then click here")
+        hd.addWidget(bld); hd.addWidget(bpd); hd.addStretch(); g2l.addLayout(hd)
         self.r_each.toggled.connect(self.dtable.setEnabled); self.dtable.setEnabled(False)
         self.dil.valueChanged.connect(self.sync_dilutions)
         v.addWidget(g2)
@@ -1364,6 +1370,53 @@ class SettingsTab(QWidget):
         if not self.r_each.isChecked():
             for i in range(self.dtable.rowCount()):
                 self.dtable.setItem(i, 2, QTableWidgetItem(f"{self.dil.value():g}"))
+
+    def load_dilutions(self):
+        f, _ = QFileDialog.getOpenFileName(self, "Load dilutions", "", "Tables (*.csv *.tsv *.txt *.xlsx *.xls)")
+        if f:
+            from mancq.figures import _read_table
+            try:
+                self.apply_dilutions(_read_table(f).values.tolist(), os.path.basename(f))
+            except Exception as exc:
+                warn(self, f"Could not read {f}:\n{exc}")
+
+    def paste_dilutions(self):
+        import re
+        text = QApplication.clipboard().text()
+        rows = [re.split(r"\t|;|,(?=\s*[\d.]+\s*$)", ln) for ln in text.splitlines() if ln.strip()]
+        if not rows:
+            warn(self, "The clipboard is empty: copy two columns in Excel (EXPNO and dilution) first."); return
+        self.apply_dilutions(rows, "the pasted table")
+
+    def apply_dilutions(self, rows, where):
+        """Fill the per-sample table from [EXPNO, dilution] rows (headers and unmatched rows are reported)."""
+        from mancq.figures import _sample_id
+        known = [self.dtable.item(i, 0).text() for i in range(self.dtable.rowCount()) if self.dtable.item(i, 0)]
+        vals, extra = {}, []
+        for r in rows:
+            if len(r) < 2:
+                continue
+            s = _sample_id(r[0], set(known))
+            try:
+                v = float(str(r[1]).strip().replace(",", "."))
+            except ValueError:
+                continue                          # a header row
+            (vals.__setitem__(s, v) if s in known else extra.append(s))
+        if not vals:
+            warn(self, f"No dilution in {where} matches the selected spectra (EXPNO {', '.join(known)})."); return
+        self.r_each.setChecked(True)
+        for i, s in enumerate(known):
+            if s in vals:
+                self.dtable.setItem(i, 2, QTableWidgetItem(f"{vals[s]:g}"))
+        missing = [s for s in known if s not in vals]
+        msg = f"Dilutions set for {len(vals)} of {len(known)} spectra from {where}."
+        if missing:
+            msg += (f"\n\nNo dilution for EXPNO {', '.join(missing)}: " +
+                    ("it keeps" if len(missing) == 1 else "they keep") + " the value in the table.")
+        if extra:
+            msg += f"\n\n{where[0].upper() + where[1:]} also has {', '.join(extra)}, " + \
+                ("which is not a selected spectrum." if len(extra) == 1 else "which are not selected spectra.")
+        QMessageBox.information(self, "Dilutions", msg)
 
     def dilutions(self):
         """(single factor, per-sample dict or None)."""
@@ -1739,16 +1792,23 @@ class ResultsTab(QWidget):
         self.table.clear()
         self.table.setRowCount(len(mets)); self.table.setColumnCount(len(samples) + 1)
         ph = ph_labels(self.data["qc"])
+        qcd = self.data["qc"]
+        qcf = dict(zip(qcd["sample"], zip(qcd["qc_flag"], qcd["qc_reason"].fillna("")))) if "qc_flag" in qcd else {}
         self.table.setHorizontalHeaderLabels(["Peak used\n(ppm)"] +
                                              [f"{s}\n{str(titles.get(s, ''))[:24]}" + (f"\n{ph[s][0]}" if s in ph else "")
+                                              + (f"\nQC: {qcf[s][0]}" if qcf.get(s, ("ok",))[0] != "ok" else "")
                                               for s in samples])
         self.table.horizontalHeaderItem(0).setToolTip(
             "Where each metabolite's value is measured: the fitted centre (ppm) of the peak(s) MANC-Q used to "
             "quantify it (its reporter peaks), median over the samples where it was Quantified or Overlapped. "
             "Hover over a value for the peak used in that sample.")
         for j, s_ in enumerate(samples):
-            self.table.horizontalHeaderItem(j + 1).setToolTip(f"EXPNO {s_}: {titles.get(s_, '')}" +
-                                                              (f"\n{ph[s_][1]}" if s_ in ph else ""))
+            hi = self.table.horizontalHeaderItem(j + 1)
+            flag, why = qcf.get(s_, ("ok", ""))
+            hi.setToolTip(f"EXPNO {s_}: {titles.get(s_, '')}" + (f"\n{ph[s_][1]}" if s_ in ph else "") +
+                          (f"\nQuality: {flag}" + (f": {why}" if why else "") if qcf else ""))
+            if flag in ("check", "poor"):
+                hi.setForeground(QBrush(QColor(theme.T("warn" if flag == "check" else "bad"))))
         self.table.setVerticalHeaderLabels(mets)
         rep_met, rep_cell = self.data.get("reporter_met", {}), self.data.get("reporter_cell", {})
         for i, m in enumerate(mets):

@@ -110,6 +110,15 @@ SETTINGS = dict(
     SHIFT_TABLE_TIERS=["Quantified", "Overlapped (semi-quantitative)", "Manually adjusted"],
     SHIFT_TABLE_MIN_FRACTION=0.25,   # ... or of the position predicted from the other proton, if one was not seen
 
+    # per-sample quality flag (qc_flag in the QC sheet: ok / check / poor, with the reasons in qc_reason)
+    QC_TSP_FWHM_HZ=(1.5, 3.0),    # TSP linewidth (Hz) above which a sample is "check" / "poor" (shimming)
+    QC_TSP_BROAD_RATIO=1.5,       # TSP this many times broader than the metabolites -> "check" (TSP bound to protein?)
+    QC_CHI2=(3.0, 10.0),          # fit chi2 per point -> check / poor
+    QC_EXPLAINED=(0.90, 0.75),    # share of the signal explained by the library below this -> check / poor
+    QC_UNASSIGNED=(10, 40),       # unassigned singlets -> check / poor
+    QC_PHASE_DEG=(1.0, 3.0),      # residual phase error at TSP (degrees) -> check / poor
+    QC_MIN_RELAXATION_S=10.0,     # D1 + AQ below this (s) -> check: signals with long T1 may be under-estimated
+
     # grading
     LOD_SNR=3, LOQ_SNR=10,
     Q_MIN_DOMINANCE=0.60, Q_MAX_MISFIT=0.25, MAX_REPORTER_RATIO=2.0,
@@ -120,6 +129,7 @@ SETTINGS = dict(
     DECONV_MAX_REL_SE=0.35, DECONV_MIN_MULTIPLETS=2,
     DECONV_MAX_MISFIT=0.5,        # a multiplet counts towards DECONV_MIN_MULTIPLETS only if its own signal is at least
                                   # twice the local misfit (not a sliver under a neighbour's imperfect fit)
+    DECONV_MIN_DOMINANCE=0.10,    # ... and this compound is at least 10% of the fitted signal under that multiplet
     MAX_REPORTER_DISAGREE=0.20,   # Quantified only if the molecule's other multiplets (above LOQ, any dominance) give a
                                   # median value within 20% of the reporter value; otherwise Overlapped
     SINGLET_NEEDS_SECOND=True,    # a lone singlet reporter is Quantified only if another multiplet of the molecule agrees
@@ -162,7 +172,7 @@ plt = _plt
 
 from .spinsim import simulate_spin_system, merge_sticks
 
-__version__ = "1.9.1"
+__version__ = "1.9.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -192,6 +202,20 @@ def _json_default(v):
 
 def read_spectrum(expdir, procno):
     pdir = os.path.join(expdir, "pdata", str(procno))
+    name = os.path.basename(os.path.normpath(expdir))
+    if os.path.exists(os.path.join(expdir, "acqu2s")) or os.path.exists(os.path.join(pdir, "2rr")):
+        raise ValueError(f"EXPNO {name} is a 2D experiment. MANC-Q quantifies 1D 1H spectra: leave it out "
+                         f"(in the window, untick it in step 1; on the command line, use --samples).")
+    if not os.path.isdir(pdir):
+        have = sorted(os.listdir(os.path.join(expdir, "pdata"))) if os.path.isdir(os.path.join(expdir, "pdata")) else []
+        raise ValueError(f"EXPNO {name} has no processed spectrum pdata/{procno}"
+                         + (f" (it has pdata/{', pdata/'.join(have)}: choose that processing number)" if have else
+                            " (process it in TopSpin, or let MANC-Q process its raw FID)") + ".")
+    if not os.path.exists(os.path.join(pdir, "procs")):
+        raise ValueError(f"EXPNO {name}: pdata/{procno} has no 'procs' file, so the spectrum's scale is unknown. It "
+                         f"was probably copied without it: copy the whole EXPNO folder again.")
+    if not os.path.exists(os.path.join(pdir, "1r")):
+        raise ValueError(f"EXPNO {name}: pdata/{procno} has no 1r file (the processed 1D spectrum).")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         dic, data = ng.bruker.read_pdata(pdir, scale_data=True, read_acqus=False)
@@ -265,13 +289,59 @@ def read_processing(path):
     return out
 
 
-def read_dilutions(path):
+def read_acquisition(expdir):
+    """Acquisition parameters that matter for quantification, from the EXPNO folder's acqus (NaN if absent):
+    D1 relaxation delay (s), AQ acquisition time (s), NS scans, RG receiver gain, PULPROG, TE temperature (K),
+    P1 90 degree pulse (us)."""
+    out = dict(D1_s=np.nan, AQ_s=np.nan, NS=np.nan, RG=np.nan, PULPROG="", TE_K=np.nan, P1_us=np.nan)
+    f = os.path.join(expdir, "acqus")
+    if not os.path.exists(f):
+        return out
+    try:
+        a = ng.bruker.read_acqus_file(expdir)["acqus"]
+    except Exception:
+        return out
+    num = lambda v: float(v) if isinstance(v, (int, float)) else np.nan
+    if isinstance(a.get("D"), list) and len(a["D"]) > 1:
+        out["D1_s"] = num(a["D"][1])
+    if isinstance(a.get("P"), list) and len(a["P"]) > 1:
+        out["P1_us"] = num(a["P"][1])
+    if num(a.get("TD")) > 0 and num(a.get("SW_h")) > 0:
+        out["AQ_s"] = num(a["TD"]) / 2 / num(a["SW_h"])
+    out.update(NS=num(a.get("NS")), RG=num(a.get("RG")), TE_K=num(a.get("TE")),
+               PULPROG=str(a.get("PULPROG", "")).strip("<> "))
+    return out
+
+
+def read_dilutions(path, samples=None, log=None):
+    """{sample: dilution} from a CSV or Excel file with the sample in the first column and the dilution in the
+    second (headers, EXPNO prefixes and 10.0 for 10 are tolerated). With samples, every sample without an entry
+    and every entry with no sample is reported through log."""
     if not path:
         return {}
     if not os.path.exists(path):
         raise FileNotFoundError(f"dilution file not found: {path}")
-    df = pd.read_csv(path)
-    return {str(k).strip(): float(v) for k, v in zip(df.iloc[:, 0], df.iloc[:, 1])}
+    from .figures import _read_table, _sample_id
+    df = _read_table(path)
+    known = set(map(str, samples or []))
+    out = {}
+    for k, v in zip(df.iloc[:, 0], df.iloc[:, 1]):
+        s = _sample_id(k, known)
+        try:
+            out[s] = float(str(v).strip())
+        except ValueError:
+            if s:
+                raise ValueError(f"dilution file {path}: the dilution for {s} is not a number ({v!r})")
+    if samples is not None and log is not None:
+        missing = [s for s in samples if s not in out]
+        extra = [s for s in out if s not in known]
+        if missing:
+            log(f"WARNING: no dilution for EXPNO {', '.join(missing)} in {os.path.basename(path)}: "
+                f"the default factor x{S['DEFAULT_DILUTION']:g} is used for them")
+        if extra:
+            log(f"WARNING: {os.path.basename(path)} has dilutions for {', '.join(extra)}, which are not among the "
+                f"spectra of this run (typing error, or a different EXPNO?)")
+    return out
 
 
 # =============================================================================
@@ -286,41 +356,61 @@ def pv(x, x0, fwhm, eta):
     return eta * lor + (1 - eta) * gau
 
 
-def noise_sigma(ppm, y):
+def noise_sigma(ppm, y, why=None):
+    """Noise standard deviation from the signal-free ends of the spectrum (10-12 and -2.5 to -0.5 ppm). If
+    neither has 200 points (a narrow spectral width), a robust estimate from the point-to-point differences of
+    the whole spectrum is used instead, and the reason is appended to the list `why`."""
     parts = []
     for lo, hi in [(10.0, 12.0), (-2.5, -0.5)]:
         m = (ppm > lo) & (ppm < hi)
         if m.sum() > 200:
             yy = y[m] - np.polyval(np.polyfit(ppm[m], y[m], 2), ppm[m])
             parts.append(1.4826 * np.median(np.abs(yy - np.median(yy))))
-    return float(np.min(parts)) if parts else float(np.std(y[:2000]))
+    if parts:
+        return float(np.min(parts))
+    if why is not None:
+        why.append("the spectrum has no signal-free region at 10-12 or -2.5 to -0.5 ppm, so the noise was estimated "
+                   "from point-to-point differences (less reliable: check LOD and SNR)")
+    d2 = y[2:] - 2 * y[1:-1] + y[:-2]               # second difference: removes smooth lines and the baseline
+    return float(1.4826 * np.median(np.abs(d2 - np.median(d2))) / np.sqrt(6.0))
 
 
 def fit_tsp(ppm, y, sf):
     """Pseudo-Voigt main line + 29Si doublet (J 6.6 Hz) + linear baseline."""
     m = (ppm > -0.2) & (ppm < 0.2)
+    if not m.any():
+        raise ValueError("the spectrum does not cover 0 ppm, where the TSP/DSS reference must be")
     x0 = ppm[m][np.argmax(y[m])]
+    if y[m].max() < 20 * noise_sigma(ppm, y):
+        raise ValueError(f"no {S['REFERENCE']} peak near 0 ppm. MANC-Q needs the TSP/DSS internal standard, "
+                         f"referenced to 0.000 ppm: check that it was added and that the spectrum is referenced "
+                         f"in TopSpin")
     w = (ppm > x0 - 0.03) & (ppm < x0 + 0.03)
     xx, yy = ppm[w], y[w]
     h = yy.max()
     fsi = S["TSP_SI29_FRACTION"]
 
+    def disp(x, c, fwhm):
+        g = fwhm / 2.0
+        return ((x - c) / np.pi) / ((x - c) ** 2 + g ** 2)
+
     def model(p):
-        c, f, eta, A, b0, b1, jsi = p
+        c, f, eta, A, b0, b1, jsi, D = p
         fp = f / sf
-        main = A * pv(xx, c, fp, eta)
+        main = A * pv(xx, c, fp, eta) + D * disp(xx, c, fp)       # D: dispersive part (residual phase error)
         sat = A * fsi / (1 - fsi) / 2 * (pv(xx, c - jsi / 2 / sf, fp, eta) + pv(xx, c + jsi / 2 / sf, fp, eta))
         return main + sat + b0 + b1 * (xx - c)
 
     A0 = h * 1.2 / sf * np.pi / 2
-    p0 = [x0, 1.2, 0.6, A0, 0, 0, 6.6]
-    lb = [x0 - 0.002, 0.3, 0.0, 0, -h, -np.inf, 5.5]
-    ub = [x0 + 0.002, 6.0, 1.0, np.inf, h, np.inf, 7.5]
+    p0 = [x0, 1.2, 0.6, A0, 0, 0, 6.6, 0.0]
+    lb = [x0 - 0.002, 0.3, 0.0, 0, -h, -np.inf, 5.5, -0.5 * A0]
+    ub = [x0 + 0.002, 6.0, 1.0, np.inf, h, np.inf, 7.5, 0.5 * A0]
     r = least_squares(lambda p: model(p) - yy, p0, bounds=(lb, ub), x_scale="jac")
-    c, f, eta, A, b0, b1, jsi = r.x
+    c, f, eta, A, b0, b1, jsi, D = r.x
     resid = np.sqrt(np.mean(r.fun ** 2)) / h
     area_total = A / (1 - fsi)          # main + 29Si satellites = all TSP protons
-    return dict(centre=c, fwhm_hz=f, eta=eta, area_main=A, area=area_total, height=h, rel_rms=resid, jsi=jsi)
+    return dict(centre=c, fwhm_hz=f, eta=eta, area_main=A, area=area_total, height=h, rel_rms=resid, jsi=jsi,
+                phase_deg=float(np.degrees(np.arctan2(-D, A))) if A > 0 else np.nan)   # size matters; sign is not TopSpin's
 
 
 # =============================================================================
@@ -646,7 +736,10 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
     t0 = time.time()
     tsp = fit_tsp(ppm_raw, y, sf)
     ppm = ppm_raw - tsp["centre"]
-    sigma = noise_sigma(ppm, y)
+    noise_why = []
+    sigma = noise_sigma(ppm, y, noise_why)
+    for w_ in noise_why:
+        log(f"   WARNING: {w_}")
     fw0 = float(np.clip(tsp["fwhm_hz"], S["LINEWIDTH_BASE_HZ"][0], S["LINEWIDTH_BASE_HZ"][1])) / sf
     eta = float(np.clip(tsp["eta"], 0.3, 1.0))
     log(f"   {S['REFERENCE']}: area={tsp['area']:.4g}  fwhm={tsp['fwhm_hz']:.2f} Hz  eta={tsp['eta']:.2f}  "
@@ -1150,7 +1243,8 @@ def fit_spectrum(ppm_raw, y, sf, lib, log):
     return dict(tsp=tsp, sigma=sigma, fw0=fw0, eta=eta, g_off=g_off, ppm=ppm, grid=grid, yv=yv, wts=wts,
                 fit=fit, base_fit=base_fit, amp=amp, se=se, MP=MP, comp_fit=comp_fit, unknown=unknown, uamp=ua,
                 unk_fit=U * ua[None, :] if len(unknown) else np.zeros((len(x), 0)),
-                chi2n=chi(fit), sf=sf, mcols=None, ph=ph)
+                chi2n=chi(fit), sf=sf, mcols=None, ph=ph, noise_method="from point-to-point differences"
+                if noise_why else "signal-free regions")
 
 
 # =============================================================================
@@ -1355,7 +1449,8 @@ def grade(res, lib, sf, cf):
             wc = a * cf if a > 0 else 0.0
             wc_se = res["se"][k] * cf if np.isfinite(res["se"][k]) else np.nan
             n_fit = sum(1 for m in mps if m.get("loc_h", 0) > S["LOQ_SNR"] * sig and id(m) not in self_contra
-                        and m.get("loc_mis", np.inf) <= S["DECONV_MAX_MISFIT"])
+                        and m.get("loc_mis", np.inf) <= S["DECONV_MAX_MISFIT"]
+                        and m.get("loc_dom", 0.0) >= S["DECONV_MIN_DOMINANCE"])
             if (np.isfinite(ub) and np.isfinite(wc_se) and wc > lod and wc <= ub
                     and n_fit >= S["DECONV_MIN_MULTIPLETS"]
                     and wc_se <= S["DECONV_MAX_REL_SE"] * wc):
@@ -1830,6 +1925,65 @@ def sample_source(smp):
     return os.path.join(S["DATA_DIR"], smp), S["PROCNO"]
 
 
+def _raw_folder(smp, expdir):
+    """The user's own EXPNO folder of a sample (with its acqus), also when MANC-Q processed it into _processed."""
+    raw = os.path.join(S["DATA_DIR"], smp) if S.get("DATA_DIR") else expdir
+    return raw if os.path.exists(os.path.join(raw, "acqus")) else expdir
+
+
+def _metabolite_fwhm(res, sf):
+    """Median fitted linewidth (Hz) of the metabolite multiplets clearly above the noise."""
+    w = [res["fw0"] * m["wf"] * sf for m in res["MP"] if m.get("loc_h", 0) > 10 * S["LOQ_SNR"] * res["sigma"]
+         and m.get("loc_dom", 0) >= S["Q_MIN_DOMINANCE"]]
+    return round(float(np.median(w)), 3) if w else np.nan
+
+
+def qc_flags(Q):
+    """Add qc_flag (ok / check / poor) and qc_reason (in words) to the per-sample QC table."""
+    Q = Q.copy()
+    flags, reasons = [], []
+    num = lambda r, k: float(r[k]) if k in r and pd.notna(r[k]) and not isinstance(r[k], str) else np.nan
+    for _, r in Q.iterrows():
+        bad, chk = [], []
+
+        def test(v, lim, text, low=False):
+            if not np.isfinite(v):
+                return
+            c, p = lim
+            if (v < p) if low else (v > p):
+                bad.append(text)
+            elif (v < c) if low else (v > c):
+                chk.append(text)
+        if "error" in r and isinstance(r["error"], str) and r["error"]:
+            flags.append("poor"); reasons.append(f"not fitted: {r['error']}"); continue
+        fw = num(r, "TSP_fwhm_Hz")
+        test(fw, S["QC_TSP_FWHM_HZ"], f"TSP line {fw:.1f} Hz wide (shimming?)")
+        mfw = num(r, "metabolite_fwhm_Hz")
+        if np.isfinite(fw) and np.isfinite(mfw) and fw > S["QC_TSP_BROAD_RATIO"] * mfw:
+            chk.append(f"TSP line ({fw:.1f} Hz) broader than the metabolites ({mfw:.1f} Hz): TSP may be bound to "
+                       f"protein, which makes every concentration too high")
+        test(num(r, "chi2_per_point"), S["QC_CHI2"], f"poor fit (chi2 per point {num(r, 'chi2_per_point'):.1f})")
+        ex = num(r, "signal_explained_by_library")
+        test(ex, S["QC_EXPLAINED"], f"only {ex:.0%} of the signal explained by the library", low=True)
+        un = num(r, "unassigned_singlets")
+        test(un, S["QC_UNASSIGNED"], f"{un:.0f} unassigned singlets (unknown compounds or a poor fit)")
+        ph = num(r, "TSP_phase_deg")
+        test(abs(ph), S["QC_PHASE_DEG"], f"residual phase error about {abs(ph):.1f} degrees at TSP: re-phase this "
+                                         f"spectrum (step 2 of the window, or TopSpin)")
+        if str(r.get("pH_flag", "")) == "protons_disagree":
+            chk.append("the two histidine pH estimates disagree")
+        d1, aq = num(r, "D1_s"), num(r, "AQ_s")
+        if np.isfinite(d1) and np.isfinite(aq) and d1 + aq < S["QC_MIN_RELAXATION_S"]:
+            chk.append(f"D1 + AQ = {d1 + aq:.1f} s (under {S['QC_MIN_RELAXATION_S']:g} s): signals with long T1 "
+                       f"(e.g. formate, aromatic protons) may read low")
+        if str(r.get("noise_method", "")).startswith("from point"):
+            chk.append("noise estimated without a signal-free region (check LOD values)")
+        flags.append("poor" if bad else "check" if chk else "ok")
+        reasons.append("; ".join(bad + chk))
+    Q["qc_flag"], Q["qc_reason"] = flags, reasons
+    return Q
+
+
 def detect_pluronic(ppm, y):
     """True if the spectrum has the tall PEO line of Pluronic F-68 near 3.71 ppm."""
     m = (ppm > 3.69) & (ppm < 3.74)
@@ -1869,6 +2023,9 @@ def _fit_one(smp, d, libdir, out):
              signal_in_unassigned_singlets=res["unk_fit"].sum() / sig_area if res["unk_fit"].size else 0.0,
              abs_residual_fraction=np.abs(res["yv"] - res["fit"]).sum() / sig_area,
              fit_time_s=round(time.time() - t0, 1), **res["ph"],
+             TSP_phase_deg=round(res["tsp"].get("phase_deg", np.nan), 2), noise_method=res["noise_method"],
+             metabolite_fwhm_Hz=_metabolite_fwhm(res, sf),
+             **read_acquisition(_raw_folder(smp, expdir)),
              processing=((S.get("PROCESSING_USED") or {}).get(smp) or {}).get(
                  "description", f"as processed in TopSpin (pdata/{procno})"))
     if S["OVERLAYS"]:
@@ -2002,7 +2159,7 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         G = G.drop(columns=["auto_tier", "auto_conc_mM", "manual_note"], errors="ignore")
     P = pd.concat(peaks, ignore_index=True)
     O = pd.concat(obs, ignore_index=True)
-    Q = pd.DataFrame(qc)
+    Q = qc_flags(pd.DataFrame(qc))
 
     # ---------- summary tables ----------
     G = G[~G.metabolite.str.startswith("Pluronic")].copy()
@@ -2058,7 +2215,7 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         "Whole spectrum fitted as a sum of simulated metabolite spectra + smooth baseline + free unassigned singlets; each multiplet has a small fitted shift and linewidth. Concentration = mean of the cleanly resolved 'reporter' multiplets (each fitted on its own); if none, the whole-compound fit. The reporter_ppm column of Long_table gives the fitted centre (ppm) of the reporter multiplet(s) a Quantified or Overlapped value comes from. " + ("A compound that only sits on other compounds' peaks (none of its multiplets dominant, and the amount its signal implies would put another of its multiplets clearly above the noise where the data, or the fit, show almost nothing) is left out of the fit, so it cannot take signal from the compounds that are there; its Long_table method says why. " if S["DROP_GHOSTS"] else "") + "A multiplet whose own fitted amount predicts the molecule's other multiplets clearly above the noise where they are missing is never used as a reporter. check_note in Long_table warns when a compound graded without a value is fitted on this compound's peak.",
         f"Clean reporter multiplet(s): SNR>={S['LOQ_SNR']}, this metabolite >={S['Q_MIN_DOMINANCE']:.0%} of the fitted signal under it, |observed-fit| <= {S['Q_MAX_MISFIT']} x its own signal, shift not at bound; either two or more reporters agreeing within x{S['MAX_REPORTER_RATIO']}, or one reporter carrying >={S['SINGLE_REPORTER_MIN_SHARE']:.0%} of the protons; no multiplet of the molecule contradicted by the data; the molecule's other multiplets above LOQ (whatever their dominance) give a median value within {S['MAX_REPORTER_DISAGREE']:.0%} of the reporter value" + ("; a lone singlet reporter must be confirmed by another multiplet of the molecule within that margin (molecules with no other multiplet, such as acetate or formate, are exempt)" if S["SINGLET_NEEDS_SECOND"] else "") + ". Otherwise the value is graded Overlapped and its method says why.",
         f"SNR>={S['LOQ_SNR']} but the best multiplet is shared (dominance {S['O_MIN_DOMINANCE']:.0%}-{S['Q_MIN_DOMINANCE']:.0%}) or misfit <= {S['O_MAX_MISFIT']}. Number depends on the overlap partners: use for trends.",
-        f"No multiplet of this metabolite is resolved enough to quantify on its own, but the whole-compound least-squares fit over >={S['DECONV_MIN_MULTIPLETS']} fitted multiplets (each above LOQ, with its own signal at least {1 / S['DECONV_MAX_MISFIT']:g} x the local misfit) is well determined (relative SE <= {S['DECONV_MAX_REL_SE']:.0%}) and sits below the data upper bound. The value is that deconvolution estimate, shown with a ~ in Report_mM. It depends on the library explaining the overlapping signals correctly, so treat it as an estimate, not a measurement.",
+        f"No multiplet of this metabolite is resolved enough to quantify on its own, but the whole-compound least-squares fit over >={S['DECONV_MIN_MULTIPLETS']} fitted multiplets (each above LOQ, at least {S['DECONV_MIN_DOMINANCE']:.0%} of the fitted signal under it, and with its own signal at least {1 / S['DECONV_MAX_MISFIT']:g} x the local misfit) is well determined (relative SE <= {S['DECONV_MAX_REL_SE']:.0%}) and sits below the data upper bound. The value is that deconvolution estimate, shown with a ~ in Report_mM. It depends on the library explaining the overlapping signals correctly, so treat it as an estimate, not a measurement.",
         "The value was set by hand in the Review step of the window (Chenomx-style: the whole simulated compound at one concentration, with a shift and linewidth chosen by the user), or refitted around a compound that was. The automatic tier and value are in the auto_tier and auto_conc_mM columns of Long_table, and every change, with who made it and when, is in Manual_edits. Report_mM marks these values with (manual). No standard error is given.",
         f"Signal is present where the metabolite would appear but it cannot be attributed to it with confidence (no usable reporter, or a multiplet the library predicts >{S['CONTRADICT_MIN_SNR']}x noise is missing). The largest concentration the data allow (upper bound) is in Report_mM as <=value and in upper_bound_mM of Long_table; conc_mM and Concentration_mM_all are blank, and the bound is never included in mean_conc_mM.",
         "Below the detection limit; Report_mM shows <LOD in mM. 'n/m' = not measurable: every peak of the metabolite lies in a region left out of the fit. " + NOT_DETECTED_NOTE,
@@ -2066,7 +2223,7 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         f"{sum(c['source']=='GISSMO' for c in lib)} GISSMO spin systems (BMRB, QM-simulated at the spectrometer frequency) + {sum(c['source']=='SPIN' for c in lib)} other spin system(s) simulated the same way + {sum(c['source']=='CASMDB' for c in lib)} fixed peak lists (CASMDB) + optional Pluronic F-68 terms. See Library sheet.",
         "Every multiplet of every metabolite in every sample: fitted centre, range, line positions and relative intensities, protons, linewidth, shift from library, dominance, misfit, concentration from that multiplet alone, and whether it was used as a reporter.",
         "Peaks picked in the observed spectrum (>10 x noise) with the fitted contributors at each apex (the peak assignment list).",
-        "Per-sample referencing, linewidth, noise, fit quality, fraction of signal explained, how the spectrum was processed, and the estimated pH.",
+        "Per-sample referencing, linewidth, noise, fit quality, fraction of signal explained, how the spectrum was processed, the estimated pH, the acquisition parameters from acqus (D1, AQ, NS, RG, PULPROG, TE, P1), the residual phase error measured on TSP (TSP_phase_deg) and the median metabolite linewidth. qc_flag sums these up: ok, check or poor, with the reasons in qc_reason (TSP linewidth, TSP much broader than the metabolites, chi2, signal explained, unassigned singlets, phase error, histidine pH flag, D1 + AQ under " + f"{S['QC_MIN_RELAXATION_S']:g}" + " s, noise estimate).",
         ph_readme() if "pH_est" in Q else "Not estimated: these results were fitted by a MANC-Q version before 1.4.",
         "Every manual adjustment: sample, metabolite, automatic and manual value, shift and linewidth used, note, user and time. Empty if nothing was adjusted.",
         "Chemical shift assignment table for publication: every metabolite with a value in the tiers SHIFT_TABLE_TIERS in at least SHIFT_TABLE_MIN_FRACTION of the samples (default Quantified, Overlapped or Manually adjusted in 25 %), its 1H shifts (fitted multiplet centres, median over those samples), * = peaks used to quantify it, ** = used but shared with another metabolite (semi-quantitative), the number of samples and the reference spectrum. The same table, formatted for a supplement, is in chemical_shift_assignments.xlsx.",
@@ -2189,10 +2346,14 @@ def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, progress=No
         log("Nothing to carry on in this folder (no stopped run of MANC-Q 1.8.1 or later): every spectrum is fitted.")
     libdir = S["LIBRARY_DIR"] or os.path.join(HERE, "library")
     S["LIBRARY_HASH"] = library_hash(libdir)
-    dil = read_dilutions(S["DILUTION_FILE"])
+    dil = read_dilutions(S["DILUTION_FILE"], samples, log)
     # spectra MANC-Q processes itself, into <out>/_processed/<sample> (the raw data are never changed): raw FIDs
     # (automatic phasing unless PROCESSING says otherwise) and TopSpin spectra the user adjusted (PROCESSING)
     sd = dict(S.get("SAMPLE_DIRS") or {})
+    for smp in samples:
+        if smp not in sd and not os.path.isdir(os.path.join(S["DATA_DIR"], smp)):
+            logf.close()
+            raise FileNotFoundError(f"EXPNO {smp} is not in {S['DATA_DIR']}")
     req = {str(k): dict(v) for k, v in (S.get("PROCESSING") or {}).items()}
     used = {}
     from . import fidproc
