@@ -322,7 +322,11 @@ class Results:
 
     def tier(self, metabolite, s):
         r = self.long[(self.long.metabolite == metabolite) & (self.long["sample"] == s)]
-        return (str(r.tier.iloc[0]), float(r.conc_mM.iloc[0])) if len(r) else ("", np.nan)
+        if not len(r):
+            return "", np.nan
+        t = str(r.tier.iloc[0])
+        ub = float(r.upper_bound_mM.iloc[0]) if "upper_bound_mM" in r else np.nan
+        return t, q.shown_value(t, float(r.conc_mM.iloc[0]), ub)      # the bound for Upper bound only
 
 
 # ---------- traces (one line in a figure): a sample, or the mean of replicate samples
@@ -935,7 +939,8 @@ def _draw_fit(fig, spec, R, tr, info):
     labs = [("measured, fit", offsets[0] + heights[0] * 0.3)]
     for k, m in enumerate(mets):
         tier, conc = R.tier(m, smp) if smp else ("", np.nan)
-        val = f" {conc:.3g} mM" if smp and np.isfinite(conc) else ""
+        val = (f" <={conc:.2g} mM" if tier == "Upper bound only" else f" {conc:.3g} mM") \
+            if smp and np.isfinite(conc) else ""
         labs.append((f"{plain_name(m)}{val}", offsets[k + 1] + heights[k + 1] * 0.2))
         names.append((m, tier, conc))
     labs.append(("residual", offsets[-1] + heights[-1] * 0.3))

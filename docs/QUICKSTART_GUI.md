@@ -104,6 +104,13 @@ Each value is coloured by how far it can be trusted:
 | Pale grey (`<=`) | Upper bound | the most it can be; not a measurement |
 | `<LOD` / `n/m` | not detected / not measurable (region ignored) | |
 
+**Not detected is recorded as 0 mM.** Metabolites graded Not detected are recorded as 0 mM. A zero means the
+signal was below this sample's detection limit (LOD_mM). It may reflect true absence, a concentration too low to
+detect, or a peak MANC-Q could not resolve in that spectrum. It is not proof that the metabolite is absent.
+Upper bounds are not measurements, so they are blank in the workbook's Concentration_mM_all sheet and in
+`concentrations_long.csv` (the bound is in Report_mM as `<=value` and in the `upper_bound_mM` column), and they
+are never included in the means on the Summary sheet.
+
 Click any value to see the fit it came from; double-click it (or click **Review and adjust this fit**) to
 open it in step 7. **Open Excel workbook** gives every table; **Export for GraphPad** writes samples x
 metabolites with only the values you chose to show.

@@ -149,7 +149,7 @@ plt = _plt
 
 from .spinsim import simulate_spin_system, merge_sticks
 
-__version__ = "1.8.1"
+__version__ = "1.8.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -1215,10 +1215,10 @@ def grade(res, lib, sf, cf):
         if np.isfinite(ub) and ub < lod:
             tier, conc = "Not detected", 0.0
         elif contradicted:
-            tier, conc = "Upper bound only", ub
+            tier, conc = "Upper bound only", np.nan
             method = f"multiplet(s) {','.join(map(str, contradicted))} predicted but absent -> data upper bound"
         elif np.isfinite(ub) and conc > S["MAX_CONC_OVER_BOUND"] * ub:
-            tier, conc = "Upper bound only", ub
+            tier, conc = "Upper bound only", np.nan
             method = "fitted value exceeds what the data allow at another multiplet -> data upper bound"
         elif clean and (not np.isfinite(cross) or cross <= S["MAX_REPORTER_RATIO"]) and \
                 (len(clean) >= 2 or clean[0]["nprot"] / c["nprot"] >= S["SINGLE_REPORTER_MIN_SHARE"]):
@@ -1236,8 +1236,12 @@ def grade(res, lib, sf, cf):
                 method = (f"whole-compound deconvolution over {n_fit} fitted multiplets, "
                           f"no resolved reporter (data upper bound {ub:.3g} mM)")
             else:
-                tier, conc = "Upper bound only", ub if np.isfinite(ub) else conc
+                if not np.isfinite(ub):
+                    ub = conc                 # no multiplet gave a bound: the whole-compound fit is the bound
+                tier, conc = "Upper bound only", np.nan
                 method = "no usable reporter -> data upper bound"
+        if tier == "Upper bound only":
+            se = np.nan                       # a bound is not a measurement (the bound is in upper_bound_mM)
         # centre (ppm, as fitted) of the multiplet(s) the value comes from, for the tiers that use reporters
         rep_ppm = ";".join(f"{float((m['p'] * m['it']).sum() / m['it'].sum() + m['d']):.4f}" for m in use)             if tier in ("Quantified", "Overlapped (semi-quantitative)") else ""
         rows.append(dict(metabolite=c["name"], cls=c["cls"], tier=tier, conc_mM=conc, se_mM=se,
@@ -1722,6 +1726,22 @@ def _fit_one(smp, d, libdir, out):
     return gr, pk, ob, q, None, lines
 
 
+NOT_DETECTED_NOTE = ("Metabolites graded Not detected are recorded as 0 mM. A zero means the signal was below this "
+                     "sample's detection limit (LOD_mM). It may reflect true absence, a concentration too low to "
+                     "detect, or a peak MANC-Q could not resolve in that spectrum. It is not proof that the "
+                     "metabolite is absent.")
+UPPER_BOUND_NOTE = ("Upper bound only values are left blank here: they are not measurements. The bound is in "
+                    "Report_mM (as <=value) and in the upper_bound_mM column of Long_table.")
+
+
+def shown_value(tier, conc, upper_bound):
+    """The number to show for one result: the upper bound for 'Upper bound only' (to be shown as <=value),
+    otherwise the measured value. (Results from before 1.8.2 kept the bound in conc_mM.)"""
+    if tier == "Upper bound only":
+        return upper_bound if np.isfinite(upper_bound) or not np.isfinite(conc) else conc
+    return conc
+
+
 TIER_ORDER = {"Quantified": 0, "Overlapped (semi-quantitative)": 1, DECONV: 2, MANUAL: 3,
               "Upper bound only": 4, "Not detected": 5, NOTMEAS: 6}
 
@@ -1819,6 +1839,7 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
     tier = G.pivot(index="metabolite", columns="sample", values="tier")
     se = G.pivot(index="metabolite", columns="sample", values="se_mM")
     lod = G.pivot(index="metabolite", columns="sample", values="LOD_mM")
+    ubd = G.pivot(index="metabolite", columns="sample", values="upper_bound_mM")
     report = conc.copy().astype(object)
     for m in report.index:
         for s_ in report.columns:
@@ -1828,7 +1849,7 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
             elif t == "Not detected":
                 report.loc[m, s_] = f"<{lod.loc[m, s_]:.2g}"
             elif t == "Upper bound only":
-                report.loc[m, s_] = f"<={conc.loc[m, s_]:.2g}"
+                report.loc[m, s_] = f"<={ubd.loc[m, s_]:.2g}"
             elif t == DECONV:
                 report.loc[m, s_] = f"~{conc.loc[m, s_]:.3g}"
             elif t == MANUAL:
@@ -1839,9 +1860,13 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
     summ["class"] = G.groupby("metabolite").cls.first()
     for lab, cond in [("n_quantified", G.tier == "Quantified"), ("n_overlapped", G.tier.str.startswith("Overlapped")),
                       ("n_manually_adjusted", G.tier == MANUAL),
-                      ("n_detected_any", ~G.tier.isin(["Not detected", NOTMEAS]))]:
+                      ("n_detected_any", ~G.tier.isin(["Not detected", NOTMEAS])),
+                      ("n_measured", G.conc_mM.notna() & (G.tier != "Not detected")),
+                      ("n_not_detected", G.tier == "Not detected")]:
         summ[lab] = G[cond].groupby("metabolite").size()
-    summ = summ.fillna({"n_quantified": 0, "n_overlapped": 0, "n_manually_adjusted": 0, "n_detected_any": 0})
+    summ = summ.fillna({k: 0 for k in ("n_quantified", "n_overlapped", "n_manually_adjusted", "n_detected_any",
+                                       "n_measured", "n_not_detected")})
+    # over measured values and zeros (Not detected) only; upper bounds are blank in conc and never averaged
     summ["mean_conc_mM"] = conc.mean(axis=1)
     summ["mean_rel_SE_%"] = (se / conc.replace(0, np.nan) * 100).mean(axis=1).round(1)
     summ["library_source"] = G.groupby("metabolite").source.first()
@@ -1849,6 +1874,7 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
     summ = summ.sort_values(["_o", "mean_conc_mM"], ascending=[True, False]).drop(columns="_o")
     idx = summ.index
     conc, report, tier, se, lod = conc.loc[idx], report.loc[idx], tier.loc[idx], se.loc[idx], lod.loc[idx]
+    ubd = ubd.loc[idx]
 
     readme = pd.DataFrame(dict(item=[
         "Software", "Units", "Reference", "How numbers are produced", "Quantified", "Overlapped (semi-quantitative)",
@@ -1862,8 +1888,8 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         f"SNR>={S['LOQ_SNR']} but the best multiplet is shared (dominance {S['O_MIN_DOMINANCE']:.0%}-{S['Q_MIN_DOMINANCE']:.0%}) or misfit <= {S['O_MAX_MISFIT']}. Number depends on the overlap partners: use for trends.",
         f"No multiplet of this metabolite is resolved enough to quantify on its own, but the whole-compound least-squares fit over >={S['DECONV_MIN_MULTIPLETS']} fitted multiplets is well determined (relative SE <= {S['DECONV_MAX_REL_SE']:.0%}) and sits below the data upper bound. The value is that deconvolution estimate, shown with a ~ in Report_mM. It depends on the library explaining the overlapping signals correctly, so treat it as an estimate, not a measurement.",
         "The value was set by hand in the Review step of the window (Chenomx-style: the whole simulated compound at one concentration, with a shift and linewidth chosen by the user), or refitted around a compound that was. The automatic tier and value are in the auto_tier and auto_conc_mM columns of Long_table, and every change, with who made it and when, is in Manual_edits. Report_mM marks these values with (manual). No standard error is given.",
-        f"Signal is present where the metabolite would appear but it cannot be attributed to it with confidence (no usable reporter, or a multiplet the library predicts >{S['CONTRADICT_MIN_SNR']}x noise is missing). The value is the largest concentration the data allow (upper bound).",
-        "Below the detection limit; Report_mM shows <LOD in mM. 'n/m' = not measurable: every peak of the metabolite lies in a region left out of the fit.",
+        f"Signal is present where the metabolite would appear but it cannot be attributed to it with confidence (no usable reporter, or a multiplet the library predicts >{S['CONTRADICT_MIN_SNR']}x noise is missing). The largest concentration the data allow (upper bound) is in Report_mM as <=value and in upper_bound_mM of Long_table; conc_mM and Concentration_mM_all are blank, and the bound is never included in mean_conc_mM.",
+        "Below the detection limit; Report_mM shows <LOD in mM. 'n/m' = not measurable: every peak of the metabolite lies in a region left out of the fit. " + NOT_DETECTED_NOTE,
         "Standard error from the least-squares fit only (noise + local misfit). Excludes library, relaxation (T1) and TSP weighing errors.",
         f"{sum(c['source']=='GISSMO' for c in lib)} GISSMO spin systems (BMRB, QM-simulated at the spectrometer frequency) + {sum(c['source']=='SPIN' for c in lib)} other spin system(s) simulated the same way + {sum(c['source']=='CASMDB' for c in lib)} fixed peak lists (CASMDB) + optional Pluronic F-68 terms. See Library sheet.",
         "Every multiplet of every metabolite in every sample: fitted centre, range, line positions and relative intensities, protons, linewidth, shift from library, dominance, misfit, concentration from that multiplet alone, and whether it was used as a reporter.",
@@ -1887,7 +1913,9 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         readme.to_excel(xw, sheet_name="README", index=False)
         summ.to_excel(xw, sheet_name="Summary")
         report.to_excel(xw, sheet_name="Report_mM")
-        conc.to_excel(xw, sheet_name="Concentration_mM_all")
+        conc.to_excel(xw, sheet_name="Concentration_mM_all", startrow=3)
+        ws = xw.sheets["Concentration_mM_all"]
+        ws["A1"], ws["A2"] = NOT_DETECTED_NOTE, UPPER_BOUND_NOTE
         se.to_excel(xw, sheet_name="SE_mM")
         tier.to_excel(xw, sheet_name="Tier")
         lod.to_excel(xw, sheet_name="LOD_mM")
@@ -1900,13 +1928,15 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
         libdf.to_excel(xw, sheet_name="Library", index=False)
         shift_sheet.to_excel(xw, sheet_name="Shift_assignments", index=False)
         for ws in xw.book.worksheets:
-            ws.freeze_panes = "B2"
+            notes = ws.title == "Concentration_mM_all"          # two notes above the table
+            ws.freeze_panes = "B5" if notes else "B2"
             for col in ws.columns:
-                width = min(60, max(10, max(len(str(c.value)) if c.value is not None else 0 for c in col[:50]) + 2))
+                width = min(60, max(10, max(len(str(c.value)) if c.value is not None else 0
+                                            for c in col[2 if notes else 0:50]) + 2))
                 ws.column_dimensions[col[0].column_letter].width = width
     if len(samples) <= S["GALLERY_MAX_SAMPLES"]:
         gallery_from_csv(out, G, P, samples, os.path.join(out, "metabolite_gallery.pdf"))
-    profiles_pdf(conc, tier, os.path.join(out, "concentration_profiles.pdf"),
+    profiles_pdf(conc.where(tier != "Upper bound only", ubd), tier, os.path.join(out, "concentration_profiles.pdf"),
                  f"Concentration across samples ({os.path.basename(out)})")
     G.to_csv(os.path.join(out, "concentrations_long.csv"), index=False)
     report.to_csv(os.path.join(out, "concentrations_report_mM.csv"))

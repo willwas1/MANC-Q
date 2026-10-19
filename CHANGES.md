@@ -2,6 +2,23 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 1.8.2 (19 October 2026)
+
+* **Upper bounds are no longer stored as measured values.** Up to 1.8.1, a metabolite graded "Upper bound
+  only" had its bound written into `conc_mM`, so it appeared as a plain number in `concentrations_long.csv`,
+  the workbook's Concentration_mM_all sheet and the mean on the Summary sheet. Now `conc_mM` is blank for
+  these; the bound is in `upper_bound_mM` and in Report_mM as `<=value`, as before. The window, the Review
+  step, the Figures labels and the concentration profiles still show the bound with `<=`. Its SE is blank too.
+* **Not detected stays 0 mM, with a disclaimer** in the README sheet, at the top of Concentration_mM_all
+  (the table now starts on row 4) and in the help: "Metabolites graded Not detected are recorded as 0 mM. A
+  zero means the signal was below this sample's detection limit (LOD_mM). It may reflect true absence, a
+  concentration too low to detect, or a peak MANC-Q could not resolve in that spectrum. It is not proof that
+  the metabolite is absent."
+* **Summary:** `mean_conc_mM` is over measured values and zeros only, never bounds; new columns
+  `n_measured` and `n_not_detected`.
+* Older results folders still open: their bounds are read from `conc_mM`, as before.
+* New check `tests/test_results_tables.py` (synthetic demo).
+
 ## 1.8.1 (19 October 2026)
 
 * **No more silent re-use of old results (please read).** Up to 1.8.0, running again into a results folder

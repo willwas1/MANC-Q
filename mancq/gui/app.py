@@ -1705,6 +1705,7 @@ class ResultsTab(QWidget):
                     vals.append(it.text() if it else "")
                 elif numbers_only:
                     ok = (m, smp) in G.index and G.loc[(m, smp)].tier in allowed
+                    ok = ok and np.isfinite(G.loc[(m, smp)].conc_mM)      # upper bounds are blank
                     vals.append(f"{G.loc[(m, smp)].conc_mM:.6g}" if ok else "")
                 else:
                     it = self.table.item(r, c)
@@ -1768,7 +1769,7 @@ class ResultsTab(QWidget):
                 elif t == "Not detected":
                     txt = "<LOD"
                 elif t == "Upper bound only":
-                    txt = f"<={r.conc_mM:.2g}"
+                    txt = f"<={q.shown_value(t, r.conc_mM, r.upper_bound_mM):.2g}"
                 elif t.startswith("Deconvolution"):
                     txt = f"~{r.conc_mM:.3g}"
                 else:
@@ -1783,7 +1784,8 @@ class ResultsTab(QWidget):
                 if (m, s) in rep_cell:
                     tip += f"\nMeasured at: {', '.join(f'{p:.3f}' for p in rep_cell[(m, s)])} ppm"
                 if t == "Manually adjusted" and "auto_tier" in r:
-                    tip += f"\nAutomatic: {r.auto_tier}, {r.auto_conc_mM:.3g} mM"
+                    tip += f"\nAutomatic: {r.auto_tier}, " + \
+                        (f"{r.auto_conc_mM:.3g} mM" if np.isfinite(r.auto_conc_mM) else "upper bound")
                 it.setToolTip(tip)
                 self.table.setItem(i, j + 1, it)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
@@ -1903,7 +1905,8 @@ class ResultsTab(QWidget):
         if not len(row):
             return f"{m} in EXPNO {s}"
         t = row.iloc[0]
-        val = "n/m" if t.tier.startswith("Not measurable") else value_text(t.tier, t.conc_mM) + " mM"
+        val = "n/m" if t.tier.startswith("Not measurable") else \
+            value_text(t.tier, q.shown_value(t.tier, t.conc_mM, t.upper_bound_mM)) + " mM"
         return f"{m} in EXPNO {s}: {val}, {t.tier}"
 
     def draw_1d(self, m, s):
@@ -2141,7 +2144,8 @@ class ResultsTab(QWidget):
         allowed = self.FILTERS[self.filter.currentIndex()][1] or ["Quantified", "Overlapped (semi-quantitative)",
                                                                  "Deconvolution estimate (low confidence)",
                                                                  "Manually adjusted"]
-        val = G.assign(v=np.where(G.tier.isin(allowed), G.conc_mM, np.nan)).pivot(index="sample", columns="metabolite", values="v")
+        shown = G.conc_mM.where(G.tier != "Upper bound only", G.upper_bound_mM.fillna(G.conc_mM))
+        val = G.assign(v=np.where(G.tier.isin(allowed), shown, np.nan)).pivot(index="sample", columns="metabolite", values="v")
         tier = G.pivot(index="sample", columns="metabolite", values="tier")
         cols = [m for m in self.mets if m in val.columns]
         f = os.path.join(self.out, "GraphPad_export.xlsx")
@@ -2180,7 +2184,8 @@ class TwoDCheck(QDialog):
         for i, r in enumerate(df.itertuples()):
             frac = r.seen / r.expected if r.expected else None
             items = [SortItem(r.metabolite, r.metabolite.lower()),
-                     SortItem(value_text(r.tier, r.conc_mM), float(np.nan_to_num(r.conc_mM))),
+                     SortItem(value_text(r.tier, q.shown_value(r.tier, r.conc_mM, r.upper_bound_mM)),
+                              float(np.nan_to_num(q.shown_value(r.tier, r.conc_mM, r.upper_bound_mM)))),
                      SortItem(r.tier),
                      SortItem(f"{r.seen} / {r.expected}" if r.expected else "none expected",
                               -1.0 if frac is None else frac, blank=frac is None),

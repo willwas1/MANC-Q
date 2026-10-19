@@ -354,6 +354,8 @@ def check_sample(d, P, G, smp, sf, offset_hz=0.0):
             continue
         chk = check(d, expected_from_table(P, r.metabolite, sf, cosy, offset_hz))
         rows.append(dict(sample=str(smp), metabolite=r.metabolite, conc_mM=r.conc_mM, tier=r.tier,
+                         upper_bound_mM=getattr(r, "upper_bound_mM", np.nan),
                          expected=len(chk), seen=sum(s >= SEEN_SNR for *_, s in chk),
                          cross_peaks="; ".join(f"{a:.3f}/{b:.3f}: {s:.0f}" for a, b, s in chk)))
-    return pd.DataFrame(rows, columns=["sample", "metabolite", "conc_mM", "tier", "expected", "seen", "cross_peaks"])
+    return pd.DataFrame(rows, columns=["sample", "metabolite", "conc_mM", "tier", "upper_bound_mM", "expected", "seen",
+                                       "cross_peaks"])

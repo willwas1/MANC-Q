@@ -173,7 +173,8 @@ class SampleFit:
         if name not in self.grades.index:
             return "", np.nan
         r = self.grades.loc[name]
-        return str(r.tier), float(r.conc_mM) if np.isfinite(r.conc_mM) else np.nan
+        v = q.shown_value(str(r.tier), float(r.conc_mM), float(r.get("upper_bound_mM", np.nan)))
+        return str(r.tier), v if np.isfinite(v) else np.nan
 
     def measurable(self, name):
         return self.auto_value(name)[0] != q.NOTMEAS
