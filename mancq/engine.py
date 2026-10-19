@@ -24,7 +24,7 @@ SETTINGS = dict(
     TARGET_POINT_HZ=0.25,         # spectra with finer digital resolution are block-averaged to this
     SAMPLES=None,                 # None = every EXPNO folder found, or a list such as ["10", "11"]
     N_WORKERS=None,               # parallel processes (None = number of CPU cores - 1)
-    RESUME=True,                  # re-use per-sample results already in <out>/_per_sample
+    RESUME=True,                  # carrying on a stopped run: re-use the spectra it finished (same run, same settings)
     GALLERY_MAX_SAMPLES=8,        # the per-metabolite gallery is only drawn for small runs
     LIBRARY_DIR=None,             # None = the library folder shipped with the package
     OVERLAYS=True,                # write one overlay PDF per spectrum
@@ -149,7 +149,7 @@ plt = _plt
 
 from .spinsim import simulate_spin_system, merge_sticks
 
-__version__ = "1.8.0"
+__version__ = "1.8.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -1507,36 +1507,143 @@ def process_sample(job):
     S.update(settings)
     per = os.path.join(out, "_per_sample")
     done = [os.path.join(per, f"{smp}_{k}.csv") for k in ("grades", "peaks", "obs", "qc")]
-    if S["RESUME"] and all(os.path.exists(f) for f in done) and _same_source(per, smp):
-        gr, pk, ob, qdf = (pd.read_csv(f) for f in done)
-        return gr, pk, ob, qdf.iloc[0].to_dict(), None, [f"Sample {smp}: re-used earlier result"]
+    note = []
+    if S["RESUME"] and all(os.path.exists(f) for f in done):
+        why = _reuse_problem(per, smp, d)
+        if why is None:
+            gr, pk, ob, qdf = (pd.read_csv(f) for f in done)
+            return gr, pk, ob, qdf.iloc[0].to_dict(), None, [f"Sample {smp}: re-used earlier result (same run, "
+                                                             f"same settings)"]
+        note = [f"Sample {smp}: its earlier result cannot be used ({why}); fitting it again"]
     try:
-        return _fit_one(smp, d, libdir, out)
+        gr, pk, ob, q, res, lines = _fit_one(smp, d, libdir, out)
+        return gr, pk, ob, q, res, note + lines
     except Exception as exc:
         import traceback
         return None, None, None, dict(sample=smp, error=f"{type(exc).__name__}: {exc}"), None, \
-            [f"Sample {smp} FAILED: {type(exc).__name__}: {exc}", traceback.format_exc()]
+            note + [f"Sample {smp} FAILED: {type(exc).__name__}: {exc}", traceback.format_exc()]
 
 
-def _source_desc(smp):
-    """Which spectrum a sample's fit came from and how it was processed; a saved result is only re-used if this
-    is unchanged."""
+# settings that do not change a sample's fitted values (where files go, speed, plots); every other setting is
+# written to <sample>_source.json and must match for a saved result to be re-used
+_NOT_FIT_SETTINGS = {"DATA_DIR", "OUT_DIR", "DILUTION_FILE", "DEFAULT_DILUTION", "SAMPLES", "N_WORKERS", "RESUME",
+                     "GALLERY_MAX_SAMPLES", "LIBRARY_DIR", "OVERLAYS", "SAMPLE_DIRS", "PROCESSING", "FID_MODE",
+                     "FID_LB", "OVERLAY_REGIONS", "SHIFT_TABLE_TIERS", "SHIFT_TABLE_MIN_FRACTION"}
+
+
+def library_hash(libdir):
+    """Fingerprint of every file in the library folder (a changed library means a saved fit is out of date)."""
+    h = hashlib.md5()
+    for fn in sorted(os.listdir(libdir)):
+        f = os.path.join(libdir, fn)
+        if os.path.isfile(f):
+            h.update(fn.encode())
+            with open(f, "rb") as fh:
+                h.update(fh.read())
+    return h.hexdigest()
+
+
+def _source_desc(smp, dilution):
+    """Everything a sample's saved result depends on: the spectrum and its processing, the run it belongs to,
+    the MANC-Q version, the library, the reference concentration, its dilution and every fitting and grading
+    setting. A saved result is only re-used if all of these are unchanged."""
     d, pn = sample_source(smp)
     u = (S.get("PROCESSING_USED") or {}).get(smp)
     d = os.path.normcase(os.path.abspath(d))
     out = os.path.normcase(os.path.abspath(S["OUT_DIR"])) if S.get("OUT_DIR") else None
     if out and d.startswith(out + os.sep):        # processed by MANC-Q into the results folder: the folder may move
         d = "<results>" + d[len(out):].replace(os.sep, "/")
-    return json.dumps(dict(spectrum=d, procno=pn,
-                           processing=u["requested"] if u else None), sort_keys=True, default=str)
+    desc = dict(spectrum=d, procno=pn, processing=u["requested"] if u else None, run_id=S.get("RUN_ID"),
+                version=__version__, library=S.get("LIBRARY_HASH"), dilution=float(dilution),
+                settings={k: S.get(k) for k in DEFAULT_SETTINGS if k not in _NOT_FIT_SETTINGS})
+    return json.loads(json.dumps(desc, sort_keys=True, default=str))     # tuples become lists, as when read back
 
 
-def _same_source(per, smp):
+_SOURCE_WHY = dict(spectrum="a different spectrum", procno="a different procno", processing="different processing",
+                   run_id="it belongs to an earlier run", version="made by another MANC-Q version",
+                   library="the compound library has changed", dilution="the dilution has changed")
+
+
+def _reuse_problem(per, smp, dilution):
+    """None if the saved result of `smp` can be re-used, otherwise the reason (in words) why not."""
     f = os.path.join(per, f"{smp}_source.json")
-    if os.path.exists(f):
-        return open(f).read() == _source_desc(smp)
-    # results from before version 1.2: only re-used for spectra used as TopSpin processed them
-    return not (S.get("PROCESSING_USED") or {}).get(smp)
+    if not os.path.exists(f):
+        return "no record of how it was made"
+    try:
+        with open(f) as fh:
+            old = json.load(fh)
+    except ValueError:
+        old = None
+    if not isinstance(old, dict) or "run_id" not in old:
+        return "made by MANC-Q 1.8.0 or earlier"
+    new = _source_desc(smp, dilution)
+    why = [_SOURCE_WHY.get(k, k) for k in new if k != "settings" and old.get(k) != new[k]]
+    so, sn = old.get("settings") or {}, new["settings"]
+    changed = sorted(k for k in set(so) | set(sn) if so.get(k) != sn.get(k))
+    if changed:
+        why.append("changed setting" + ("s " if len(changed) > 1 else " ") + ", ".join(changed))
+    return "; ".join(why) or None
+
+
+# =============================================================================
+# Results folders: refuse to mix a new run with the results of an earlier one
+# =============================================================================
+EXISTING_MESSAGE = "This folder already has MANC-Q results. Running here will overwrite them."
+# what a run writes at the top of its results folder (overlay PDFs and simulated spectra are matched by pattern);
+# _cache (the simulated library), figures/ and sample_sheet.csv (the user's Figures work) and other files are kept
+_RESULT_FILES = ["concentrations_long.csv", "concentrations_report_mM.csv", "peak_list_by_metabolite.csv",
+                 "observed_peaks_assigned.csv", "qc_per_sample.csv", "manual_edits.csv", "processing_used.csv",
+                 "metabolite_concentrations.xlsx", "chemical_shift_assignments.xlsx", "metabolite_gallery.pdf",
+                 "concentration_profiles.pdf", "run_log.txt", "regrade_log.txt", "MANC-Q settings used.json",
+                 "dilutions_used.csv"]
+_RESULT_DIRS = ["_per_sample", "_processed"]
+
+
+class ResultsExist(Exception):
+    """The results folder already holds MANC-Q results and the run was not told what to do with them."""
+
+
+def has_results(out):
+    """True if `out` already holds MANC-Q results (concentrations_long.csv or _per_sample)."""
+    return bool(out) and any(os.path.exists(os.path.join(out, m)) for m in ("concentrations_long.csv", "_per_sample"))
+
+
+def previous_run(out):
+    """What run_settings.json says about the run in `out`: dict(run_id, samples, complete), or None."""
+    f = os.path.join(out, "_per_sample", "run_settings.json")
+    try:
+        with open(f) as fh:
+            rs = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return dict(run_id=rs.get("RUN_ID"), samples=rs.get("RUN_SAMPLES"), complete=bool(rs.get("RUN_COMPLETE")))
+
+
+def new_run_folder(out):
+    """A new, not yet existing subfolder of `out` for a run, e.g. <out>/run_2026-10-19_1340."""
+    base = os.path.join(out, f"run_{time.strftime('%Y-%m-%d_%H%M')}")
+    f, k = base, 2
+    while os.path.exists(f):
+        f, k = f"{base}_{k}", k + 1
+    return f
+
+
+def clear_results(out, keep=()):
+    """Delete the results of earlier runs from `out`: the tables, workbooks, PDFs, logs, simulated spectra,
+    _per_sample (including manual adjustments) and _processed. Files in `keep` are left alone."""
+    import shutil
+    import glob
+    keep = {os.path.normcase(os.path.abspath(k)) for k in keep if k}
+    files = [os.path.join(out, f) for f in _RESULT_FILES]
+    files += glob.glob(os.path.join(out, "overlay_sample_*.pdf"))
+    files += glob.glob(os.path.join(out, "simulated_spectrum_sample_*.csv.gz"))
+    for f in files:
+        if os.path.isfile(f) and os.path.normcase(os.path.abspath(f)) not in keep:
+            os.remove(f)
+    for d_ in _RESULT_DIRS:
+        p = os.path.join(out, d_)
+        if os.path.isdir(p):
+            shutil.rmtree(p)
 
 
 def sample_source(smp):
@@ -1610,7 +1717,8 @@ def _fit_one(smp, d, libdir, out):
     ob.to_csv(os.path.join(per, f"{smp}_obs.csv"), index=False)
     pd.DataFrame([q]).to_csv(os.path.join(per, f"{smp}_qc.csv"), index=False)
     open(os.path.join(per, f"{smp}_log.txt"), "w").write("\n".join(lines))
-    open(os.path.join(per, f"{smp}_source.json"), "w").write(_source_desc(smp))
+    with open(os.path.join(per, f"{smp}_source.json"), "w") as fh:
+        json.dump(_source_desc(smp, d), fh, sort_keys=True, indent=1)
     return gr, pk, ob, q, None, lines
 
 
@@ -1819,9 +1927,13 @@ def aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log):
     return G
 
 
-def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, progress=None, cancel=None, **settings):
+def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, progress=None, cancel=None, existing="stop",
+        **settings):
     """Quantify every spectrum under data_dir (or the single EXPNO folder data_dir) into out_dir.
 
+    existing: what to do if out_dir already holds MANC-Q results. "stop" (default) raises ResultsExist;
+    "overwrite" deletes them first (see clear_results); "resume" carries on the stopped run in out_dir, re-using
+    the spectra it finished if nothing that affects them has changed.
     progress(event, sample, info): optional callback; events are "run_started", "sample_started",
     "sample_done", "sample_failed", "cancelled", "aggregating", "finished".
     cancel(): optional function returning True to stop; spectra already running are finished first."""
@@ -1845,13 +1957,36 @@ def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, progress=No
     if not samples:
         raise FileNotFoundError(f"no spectra found: expected <EXPNO>/pdata/{S['PROCNO']}/1r under {data_dir}")
     out = S["OUT_DIR"]
+    if existing not in ("stop", "overwrite", "resume"):
+        raise ValueError(f"existing must be 'stop', 'overwrite' or 'resume', not {existing!r}")
+    prev = previous_run(out) if has_results(out) else None
+    if has_results(out) and existing == "stop":
+        raise ResultsExist(f"{EXISTING_MESSAGE}\nResults folder: {out}")
+    cleared = False
+    if has_results(out) and existing == "overwrite":
+        clear_results(out, keep=[dilution_file])
+        cleared = True
+    S["RUN_ID"] = None
+    if existing == "resume" and prev and prev["run_id"]:
+        if prev["samples"] and sorted(map(str, prev["samples"])) != sorted(map(str, samples)):
+            raise ValueError(f"To carry on the stopped run in {out}, choose the same spectra as before "
+                             f"(EXPNO {', '.join(map(str, prev['samples']))}).")
+        S["RUN_ID"] = prev["run_id"]                 # same run: its finished spectra may be re-used
+    resumed = S["RUN_ID"] is not None
+    if not resumed:
+        S["RUN_ID"] = f"{time.strftime('%Y%m%d-%H%M%S')}-{os.urandom(4).hex()}"
     os.makedirs(out, exist_ok=True)
     logf = open(os.path.join(out, "run_log.txt"), "w")
 
     def log(msg):
         print(msg, flush=True); logf.write(msg + "\n"); logf.flush()
 
+    if cleared:
+        log("Overwrite: the results of the earlier run in this folder were deleted.")
+    elif existing == "resume" and not resumed:
+        log("Nothing to carry on in this folder (no stopped run of MANC-Q 1.8.1 or later): every spectrum is fitted.")
     libdir = S["LIBRARY_DIR"] or os.path.join(HERE, "library")
+    S["LIBRARY_HASH"] = library_hash(libdir)
     dil = read_dilutions(S["DILUTION_FILE"])
     # spectra MANC-Q processes itself, into <out>/_processed/<sample> (the raw data are never changed): raw FIDs
     # (automatic phasing unless PROCESSING says otherwise) and TopSpin spectra the user adjusted (PROCESSING)
@@ -1899,8 +2034,13 @@ def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, progress=No
     if rows:
         pd.DataFrame(rows).to_csv(os.path.join(out, "processing_used.csv"), index=False)
     os.makedirs(os.path.join(out, "_per_sample"), exist_ok=True)
-    json.dump(dict({k: v for k, v in S.items() if k != "OVERLAY_REGIONS"}, MANCQ_VERSION=__version__),
-              open(os.path.join(out, "_per_sample", "run_settings.json"), "w"), indent=1, default=str)
+
+    def save_run_settings(complete):
+        with open(os.path.join(out, "_per_sample", "run_settings.json"), "w") as fh:
+            json.dump(dict({k: v for k, v in S.items() if k != "OVERLAY_REGIONS"}, MANCQ_VERSION=__version__,
+                           RUN_SAMPLES=list(samples), RUN_COMPLETE=complete), fh, indent=1, default=str)
+
+    save_run_settings(False)
     log(f"MANC-Q {__version__}   {time.strftime('%Y-%m-%d %H:%M')}\nData: {S['DATA_DIR']}\n"
         f"Samples ({len(samples)}): {samples}\nReference: {S['REFERENCE']} {S['TSP_MM_IN_TUBE']} mM in tube\n"
         f"Ignored regions (ppm): {', '.join(f'{a:.2f}-{b:.2f}' for a, b in S['EXCLUDE'])}\n"
@@ -1980,6 +2120,7 @@ def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, progress=No
     say("aggregating", None, {})
     done_samples = [s_ for s_ in samples if s_ in results and results[s_][0] is not None]
     G = aggregate_outputs(out, grades, peaks, obs, qc, lib, done_samples, log)
+    save_run_settings(not cancelled and not failed)
     logf.close()
     say("finished", None, dict(ok=True, failed=failed, cancelled=cancelled, out=out))
     return G

@@ -48,9 +48,28 @@ Optional settings:
 | `--processing proc.csv` | process these spectra in MANC-Q (see below); `processing_used.csv` from an earlier run repeats its processing exactly |
 | `--no-overlays` | skip the overlay PDFs |
 | `--workers 4` | number of spectra fitted in parallel |
+| `--overwrite` | the results folder already has MANC-Q results: delete them and run again (see below) |
+| `--resume` | carry on a run that was stopped or crashed in this results folder (see below) |
 
-A fit takes roughly 1 to 5 minutes per spectrum on one core. Runs resume: if you stop a run and start it again,
-finished spectra are reused (unless their processing has changed, in which case they are fitted again).
+A fit takes roughly 1 to 5 minutes per spectrum on one core.
+
+### A results folder that already has results
+
+If the results folder already holds MANC-Q results (`concentrations_long.csv` or `_per_sample`), `mancq run`
+stops with "This folder already has MANC-Q results. Running here will overwrite them." and runs nothing. Then:
+
+* give a new results folder (the safest), or
+* add `--overwrite`: the old results are deleted first, including manual adjustments made in the Review step
+  and the spectra MANC-Q processed (`_processed`). Your own files in the folder, the Figures settings and
+  `sample_sheet.csv` are kept, or
+* add `--resume` to carry on a run that was stopped or crashed: give the same spectra and settings as before.
+  Spectra it finished are re-used only if nothing that affects their values has changed (the spectrum and its
+  processing, the TSP concentration, the dilution, the ignored regions, the fit range, Pluronic, any other
+  fitting or grading setting, the compound library and the MANC-Q version); any that changed are fitted again,
+  and `run_log.txt` says why.
+
+Before version 1.8.1, MANC-Q silently re-used earlier results in the same folder, even when the TSP
+concentration or other settings had changed.
 
 ### Changing the processing of a spectrum
 

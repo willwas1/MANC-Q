@@ -2,6 +2,26 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 1.8.1 (19 October 2026)
+
+* **No more silent re-use of old results (please read).** Up to 1.8.0, running again into a results folder
+  that already had results re-used the earlier fit of every spectrum, even if the TSP concentration, the
+  dilution, the ignored regions or other settings had changed, so the new values could be wrong without any
+  sign. A rerun of only some spectra also dropped the others from the tables. If you ever ran twice into the
+  same folder with different settings, run those spectra again into a new folder.
+* **The window warns when a results folder already has results**, on the Settings step as soon as you choose
+  it and again when you click Start: "This folder already has MANC-Q results. Running here will overwrite
+  them." Choose **New subfolder** (the default, e.g. `run_2026-10-19_1340` inside it), **Overwrite** (deletes
+  the old results, including manual adjustments and spectra processed by MANC-Q) or **Cancel**. If the run in
+  that folder was stopped or crashed, **Carry on the stopped run** fits only what is missing.
+* **Command line:** `mancq run` stops with the same message unless the folder is new, `--overwrite` is given,
+  or `--resume` is given to carry on a stopped run. See `docs/COMMAND_LINE.md`.
+* **Carrying on a stopped run is checked.** A spectrum is only re-used if it belongs to the same run and
+  nothing that affects its values has changed: the spectrum and its processing, the TSP concentration, its
+  dilution, every fitting and grading setting, the compound library and the MANC-Q version (all written to
+  `_per_sample/<EXPNO>_source.json`). Otherwise it is fitted again and the log says why.
+* New check `tests/test_overwrite.py` (synthetic demo).
+
 ## 1.8.0 (16 October 2026)
 
 * **File menu and a dark mode switch.** A **File** menu in the top left corner: Open a results folder,

@@ -1296,19 +1296,22 @@ class SettingsTab(QWidget):
         g3l.addWidget(QLabel("Results folder"), 0, 0)
         self.out = QLineEdit(); g3l.addWidget(self.out, 0, 1)
         bo = QPushButton("Browse..."); bo.clicked.connect(self.browse_out); g3l.addWidget(bo, 0, 2)
+        self.out_warn = QLabel(); theme.role(self.out_warn, "warn"); self.out_warn.setWordWrap(True)
+        self.out_warn.setVisible(False); g3l.addWidget(self.out_warn, 1, 1, 1, 2)
+        self.out.textChanged.connect(self.check_out)
         ncpu = os.cpu_count() or 1
-        g3l.addWidget(QLabel("CPU cores to use"), 1, 0)
+        g3l.addWidget(QLabel("CPU cores to use"), 2, 0)
         self.workers = QSpinBox(); self.workers.setRange(1, max(1, ncpu))
-        self.workers.setValue(max(1, ncpu - 1)); g3l.addWidget(self.workers, 1, 1)
+        self.workers.setValue(max(1, ncpu - 1)); g3l.addWidget(self.workers, 2, 1)
         cn = QLabel(f"This PC has {ncpu}. Each core fits one spectrum at a time, so more cores only help with "
                     "several spectra. Use fewer to keep the PC responsive for other work.")
         cn.setWordWrap(True); theme.role(cn, "muted")
-        g3l.addWidget(cn, 2, 1, 1, 2)
+        g3l.addWidget(cn, 3, 1, 1, 2)
         self.workers.setToolTip("Number of spectra fitted at the same time (one per CPU core)")
         self.overlays = QCheckBox("Write an overlay PDF for every spectrum (recommended)"); self.overlays.setChecked(True)
-        g3l.addWidget(self.overlays, 3, 0, 1, 3)
+        g3l.addWidget(self.overlays, 4, 0, 1, 3)
         self.notify = QCheckBox("Tell me when a run finishes (Windows notification and a sound)")
-        self.notify.setChecked(True); g3l.addWidget(self.notify, 4, 0, 1, 3)
+        self.notify.setChecked(True); g3l.addWidget(self.notify, 5, 0, 1, 3)
         v.addWidget(g3)
         h2 = QHBoxLayout()
         bs = QPushButton("Save settings..."); bs.clicked.connect(self.save); h2.addWidget(bs)
@@ -1332,6 +1335,13 @@ class SettingsTab(QWidget):
         d = QFileDialog.getExistingDirectory(self, "Choose where to put the results", self.out.text() or "")
         if d:
             self.out.setText(d)
+
+    def check_out(self):
+        """Warn as soon as the chosen results folder already holds MANC-Q results."""
+        has = q.has_results(self.out.text().strip())
+        self.out_warn.setText(f"{q.EXISTING_MESSAGE} When you click Start you can choose a new subfolder "
+                              "inside it instead." if has else "")
+        self.out_warn.setVisible(has)
 
     def refresh(self):
         sel = [s for s in self.win.spectra if s["selected"]]
@@ -1403,8 +1413,8 @@ class RunTab(QWidget):
         self.durations, self.n_total, self.n_done = [], 0, 0
         v = QVBoxLayout(self)
         v.addWidget(heading("5  Run", "Each spectrum takes 1 to 5 minutes. You can leave this running. If it is "
-                            "stopped, finished spectra are kept, and starting again with the same results folder "
-                            "carries on from where it stopped."))
+                            "stopped, finished spectra are kept: click Start again with the same results folder and "
+                            "choose Carry on to fit only what is missing."))
         self.overall = QLabel("Not started."); v.addWidget(self.overall)
         self.bar = QProgressBar(); self.bar.setValue(0); v.addWidget(self.bar)
         self.table = QTableWidget(0, 4); self.table.setHorizontalHeaderLabels(["EXPNO", "Title", "Status", "Result"])
@@ -3019,6 +3029,22 @@ class MainWindow(QMainWindow):
         out = st.out.text().strip()
         if not out:
             warn(self, "Choose a results folder (step 4)."); return
+        existing = "stop"
+        if q.has_results(out):
+            choice = self.ask_existing(out, [s["expno"] for s in sel])
+            if choice is None:
+                return
+            if choice == "new":
+                out = q.new_run_folder(out)
+            elif choice == "overwrite":
+                try:
+                    q.clear_results(out)
+                except OSError as exc:
+                    warn(self, "Could not delete the old results (is a file from this folder open in Excel or "
+                               f"a PDF viewer?):\n{exc}"); return
+                st.check_out()
+            else:
+                existing = "resume"
         try:
             os.makedirs(out, exist_ok=True)
         except OSError as exc:
@@ -3032,6 +3058,7 @@ class MainWindow(QMainWindow):
         settings = dict(REFERENCE=st.ref.currentText().split("-")[0], PROCNO=self.spectra_tab.procno.value(),
                         SAMPLES=[s["expno"] for s in sel], N_WORKERS=st.workers.value(),
                         OVERLAYS=st.overlays.isChecked(), RESUME=True, PROCESSING=processing)
+        settings["existing"] = existing
         settings.update(self.regions_tab.engine_settings())
         json.dump(dict(folder=self.folder, settings=st.to_json(), regions=self.regions_tab.to_json(),
                        processing=processing),
@@ -3045,6 +3072,35 @@ class MainWindow(QMainWindow):
         self.running = True
         self.tabs.setCurrentWidget(self.run_tab)
         self.run_tab.start(job)
+
+    def ask_existing(self, out, expnos):
+        """The results folder already has results: "new" (a subfolder), "overwrite", "resume" or None (cancel).
+        Carry on is only offered when the run in the folder was stopped or crashed with the same spectra."""
+        prev = q.previous_run(out)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning); box.setWindowTitle("Results folder")
+        box.setText(q.EXISTING_MESSAGE)
+        info = (f"New subfolder: run into {os.path.basename(q.new_run_folder(out))} inside this folder and keep "
+                "the old results.\nOverwrite: delete the old results, including manual adjustments and spectra "
+                "processed by MANC-Q, then run.")
+        resume = None
+        if prev and prev["run_id"] and not prev["complete"] and \
+                sorted(map(str, prev["samples"] or [])) == sorted(map(str, expnos)):
+            resume = box.addButton("Carry on the stopped run", QMessageBox.AcceptRole)
+            info += ("\nCarry on: the run in this folder did not finish. Spectra it finished are kept (if no "
+                     "setting has changed) and only the rest are fitted.")
+        box.setInformativeText(info)
+        new = box.addButton("New subfolder", QMessageBox.AcceptRole)
+        over = box.addButton("Overwrite", QMessageBox.DestructiveRole)
+        box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(new)
+        box.exec()
+        c = box.clickedButton()
+        if c is new:
+            return "new"
+        if c is over:
+            return "overwrite"
+        return "resume" if resume is not None and c is resume else None
 
     def closeEvent(self, ev):
         if self.running and QMessageBox.question(self, "Run in progress",

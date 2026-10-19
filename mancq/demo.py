@@ -165,7 +165,7 @@ def demo(out="mancq_demo", sf=600.13):
     print(f"Writing two synthetic {sf:.2f} MHz spectra of {len(TRUTH_MM)} metabolites to {spec_dir}:\n"
           f"  EXPNO 10 processed (1r), EXPNO 11 raw FID only (processed by MANC-Q), EXPNO 12 a 2D TOCSY of 10 ...")
     write_demo(spec_dir, sf, cache_dir=os.path.join(out, "results", "_cache"))
-    q.run(spec_dir, res_dir, REF_MM, dilution=1.0, N_WORKERS=2, RESUME=False)
+    q.run(spec_dir, res_dir, REF_MM, dilution=1.0, N_WORKERS=2, existing="overwrite")
     g = pd.read_csv(os.path.join(res_dir, "concentrations_long.csv"), dtype={"sample": str})
     rows = []
     for smp in ("10", "11"):

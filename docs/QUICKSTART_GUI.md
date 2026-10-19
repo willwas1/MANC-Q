@@ -70,12 +70,24 @@ one). Fewer cores leave the PC free for other work; more cores only help when th
 **Tell me when a run finishes** ticked, Windows shows a notification and plays a sound at the end of a run.
 Click **Start**.
 
+If the results folder already holds MANC-Q results, a warning appears under it: "This folder already has
+MANC-Q results. Running here will overwrite them." When you click **Start** you choose:
+
+* **New subfolder** (the default): the run goes into a new folder such as `run_2026-10-19_1340` inside it, and
+  the old results stay as they are.
+* **Overwrite**: the old results are deleted, including manual adjustments made in the Review step and the
+  spectra MANC-Q processed, then the run starts. Your own files, the Figures settings and the sample sheet are kept.
+* **Cancel**: nothing happens, so you can choose another folder.
+* **Carry on the stopped run** (only if the run in that folder was stopped or crashed, with the same spectra):
+  spectra it finished are kept, if nothing that affects their values has changed, and only the rest are fitted.
+
 ## 5 Run
 
 ![Run](images/5_run.png)
 
 Progress for each spectrum and the time remaining (also shown in the window title, so you can see it while
-working in another program). You can cancel; finished spectra are kept.
+working in another program). You can cancel; finished spectra are kept, and **Start** with the same results
+folder then offers **Carry on the stopped run**.
 
 ## 6 Results
 

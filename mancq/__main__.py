@@ -45,7 +45,13 @@ def main(argv=None):
                         "source fid = the raw FID; blank ph0 = automatic). processing_used.csv from an earlier run "
                         "repeats its processing exactly")
     r.add_argument("--no-overlays", action="store_true", help="skip the per-spectrum overlay PDFs (faster)")
-    r.add_argument("--no-resume", action="store_true", help="refit spectra that already have results in the output folder")
+    r.add_argument("--overwrite", action="store_true",
+                   help="the output folder already has MANC-Q results: delete them (including manual adjustments) "
+                        "and run again")
+    r.add_argument("--resume", action="store_true",
+                   help="carry on a run that was stopped or crashed in this output folder: spectra it finished are "
+                        "re-used if nothing that affects them has changed")
+    r.add_argument("--no-resume", action="store_true", help="with --resume: fit every spectrum again anyway")
 
     d = sub.add_parser("demo", help="make synthetic spectra (one processed, one raw FID) of known composition and quantify them")
     d.add_argument("output", nargs="?", default="mancq_demo", help="demo folder (default ./mancq_demo)")
@@ -81,7 +87,22 @@ def main(argv=None):
         if a.processing:
             from .engine import read_processing
             extra["PROCESSING"] = read_processing(a.processing)
-        run(a.spectra, a.output, a.ref_mm, dilution=a.dilution, dilution_file=a.dilution_file, **extra)
+        if a.overwrite and a.resume:
+            print("Use either --overwrite or --resume, not both.")
+            return 2
+        from .engine import ResultsExist
+        try:
+            run(a.spectra, a.output, a.ref_mm, dilution=a.dilution, dilution_file=a.dilution_file,
+                existing="overwrite" if a.overwrite else "resume" if a.resume else "stop", **extra)
+        except ResultsExist as exc:
+            print(f"{exc}\n\nNothing was run. Either:\n"
+                  "  * give a new output folder, or\n"
+                  "  * add --overwrite to delete the old results (including manual adjustments) and run again, or\n"
+                  "  * add --resume to carry on a run that was stopped or crashed (same spectra and settings).")
+            return 2
+        except ValueError as exc:
+            print(exc)
+            return 2
     elif a.cmd == "demo":
         from .demo import demo
         demo(a.output, a.field)
