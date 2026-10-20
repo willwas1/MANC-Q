@@ -26,8 +26,8 @@ STYLES = [("Numbers (key in the caption)", "numbers"), ("Abbreviations", "abbrev
 
 
 def _A():
-    from mancq.gui import app
-    return app
+    from mancq.gui import common             # the window's shared helpers (messages, buttons, help)
+    return common
 
 
 def swatch(colour, size=14):

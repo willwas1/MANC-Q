@@ -8,6 +8,8 @@ import os
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette
+import logging
+_log = logging.getLogger("mancq")      # see mancq.log (window) or the console
 
 PURPLE, GOLD = "#660099", "#FFCC33"          # Manchester purple and gold
 
@@ -19,6 +21,11 @@ DARK = dict(bg="#0B0A0D", surface="#16131A", surface2="#211C27", text="#F2EEF6",
             line="#352D3F", accent="#7A1FB0", accent_hover="#8E33C6", accent_fg="#C99DEB", accent_text="#FFFFFF",
             gold=GOLD, ok="#4ADE80", warn="#FBBF24", bad="#F87171", info_bg="#1D1326", info_line="#4B2F66",
             disabled="#6F6779", sel="#7A1FB0", sel_text="#FFFFFF", edge="#8C8398")
+
+# table cell colours of each tier (one table for the window and the PDF profiles, in mancq.engine)
+from mancq.engine import TIER_COLOURS as _TC
+TIER_COL = {t: c[1] for t, c in _TC.items()}
+TIER_TXT = {t: c[2] for t, c in _TC.items()}
 
 _current = dict(LIGHT)
 _dark = False
@@ -80,6 +87,7 @@ def _tick_file():
             if not img.save(f, "PNG"):
                 return None
         except Exception:
+            _log.debug("the tick image could not be made", exc_info=True)
             return None
     return f.replace(os.sep, "/")
 
@@ -185,4 +193,4 @@ def apply(app, mode=None):
         try:
             fn()
         except Exception:
-            pass
+            _log.warning("a part of the window could not be redrawn in the new colours", exc_info=True)

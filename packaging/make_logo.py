@@ -9,7 +9,7 @@ and below) get a thicker line so the four peaks stay visible. Writes:
     mancq/gui/assets/mancq_logo.svg          master drawing
     mancq/gui/assets/mancq_logo_<n>.png      16, 24, 32, 48, 64, 128, 256 px
     mancq/gui/assets/mancq.ico               Windows icon (all sizes; window, taskbar, shortcut, installer, .exe)
-    docs/images/logo.png, mancq/help/images/logo.png   96 px, for the README and the quick start guide
+    mancq/help/images/logo.png               96 px, for the README and the quick start guide
 
 Needs PySide6 (to draw the PNGs) and Pillow (to pack the .ico).
 """
@@ -75,7 +75,7 @@ def main():
         f = os.path.join(ASSETS, f"mancq_logo_{px}.png")
         render_png(f, px)
         pngs[px] = f
-    for d in (os.path.join(ROOT, "docs", "images"), os.path.join(ROOT, "mancq", "help", "images")):
+    for d in (os.path.join(ROOT, "mancq", "help", "images"),):
         render_png(os.path.join(d, "logo.png"), 96)
     big = Image.open(pngs[256]).convert("RGBA")
     big.save(os.path.join(ASSETS, "mancq.ico"), format="ICO", sizes=[(s, s) for s in SIZES],

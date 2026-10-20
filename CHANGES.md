@@ -2,6 +2,29 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 1.11.0 (20 October 2026)
+
+Split and slim. No change in results: the demo gives exactly the same values, digit for digit, as 1.9.2
+and 1.10.0.
+
+* **The engine in parts.** `engine.py` (2,500 lines) is now `settings.py` (the defaults, with the SETTINGS
+  block at the top, and the settings of a run), `io.py` (reading spectra and files), `library.py`,
+  `fit.py`, `grade.py` and `report.py`. `engine.py` runs them for a folder of spectra and still offers every
+  name, so scripts that use `mancq.engine` keep working.
+* **The window in parts:** one file per step (`gui/spectra_step.py` ... `gui/review_step.py`), shared
+  helpers in `gui/common.py`, and the main window in `gui/app.py`.
+* **One copy of the quick start and its screenshots,** in `mancq/help/` (also the window's Help); the copies
+  in `docs/` are gone and the README links to it.
+* **Errors that were caught and ignored are now logged** (Python's `logging`, name "mancq"): in the window
+  to `mancq.log` next to its remembered settings, on the command line to the screen.
+* **One colour table for the tiers** (`TIER_COLOURS`), used by the window and the concentration profiles
+  PDF (whose markers now use the same blue and orange as the window).
+* **Fixed numbers moved into SETTINGS with comments:** the line window (`LINE_WINDOW_PPM`), multiplet grouping
+  (`MULTIPLET_GAP_HZ`, `MULTIPLET_MAX_SPAN_PPM`), the glucose anomer ratio (`GLUCOSE_ALPHA_FRACTION`) and
+  the limits of unassigned singlets (`UNKNOWN_WIDTH_START`, `UNKNOWN_WIDTH_RANGE`, `UNKNOWN_MOVE_HZ`). The
+  library cache now notices a change to these.
+* Removed the unused `gallery_pdf`; tidied a few lines.
+
 ## 1.10.0 (19 October 2026)
 
 Structure for the future. No change in results: the demo gives exactly the same values as 1.9.2.

@@ -24,6 +24,8 @@ import os
 import warnings
 import numpy as np
 import nmrglue as ng
+import logging
+_log = logging.getLogger("mancq")      # see mancq.log (window) or the console
 
 DEFAULTS = dict(lb=0.3, si=None, ph0=None, ph1=None, baseline=True, water_ppm=None, water_halfwidth=0.25)
 
@@ -109,6 +111,7 @@ def baseline_correct(ppm, y, keep, knot_ppm=0.5):
         try:
             spl = make_lsq_spline(xs, ys, t, k=3)
         except Exception:
+            _log.debug("baseline spline could not be refined further", exc_info=True)
             break
         b = spl(x)
         r = yy - b

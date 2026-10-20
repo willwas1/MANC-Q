@@ -1,5 +1,5 @@
 """Re-apply the grading rules to a finished run without refitting (seconds instead of minutes per spectrum).
-Uses the fit state cached in <output>/_per_sample/*_fit.npz. Grading values come from SETTINGS in engine.py
+Uses the fit state cached in <output>/_per_sample/*_fit.npz. Grading values come from SETTINGS in settings.py
 (or regrade(out, LOQ_SNR=8, ...)); everything else from the run's own saved settings."""
 import os
 import time
@@ -48,8 +48,8 @@ def regrade(out, library_dir=None, **grading):
             with np.load(os.path.join(per, f"{smp}_fit.npz"), allow_pickle=False) as z:
                 sf = float(z["sf"])
                 pl = bool(z["pluronic"]) if "pluronic" in z else True
-            slib = q.prepare_library(q.build_library(sf, libdir, os.path.join(out, "_cache"), S=S), sf, pl)
-            lib = lib or q.prepare_library(q.build_library(sf, libdir, os.path.join(out, "_cache"), S=S), sf, True)
+            slib = q.prepare_library(q.build_library(sf, libdir, os.path.join(out, "_cache"), S=S), sf, pl, S=S)
+            lib = lib or q.prepare_library(q.build_library(sf, libdir, os.path.join(out, "_cache"), S=S), sf, True, S=S)
             d, MP = rs.load_fit(out, smp, slib, log)
 
             class Grid:

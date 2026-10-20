@@ -1,4 +1,4 @@
-<img src="docs/images/logo.png" width="96" alt="MANC-Q logo">
+<img src="mancq/help/images/logo.png" width="96" alt="MANC-Q logo">
 
 # MANC-Q
 
@@ -28,7 +28,7 @@ standard. No spiked standards and no calibration curves are needed.
    adjust it by hand, as in Chenomx; adjusted values get their own tier, "Manually adjusted", with the automatic
    value kept beside them.
 
-![MANC-Q results screen](docs/images/6_results.png)
+![MANC-Q results screen](mancq/help/images/6_results.png)
 
 ## Get started on Windows
 
@@ -95,7 +95,7 @@ then says PySide6 is missing, run `python -m pip install PySide6-Essentials` and
 ## Your first analysis
 
 MANC-Q opens on the first of eight tabs. The full guide with pictures is in
-[docs/QUICKSTART_GUI.md](docs/QUICKSTART_GUI.md), and the **Help** button on each tab shows its part of it.
+[mancq/help/QUICKSTART_GUI.md](mancq/help/QUICKSTART_GUI.md), and the **Help** button on each tab shows its part of it.
 MANC-Q remembers your settings from the last session.
 
 1. **Spectra.** Click **Try the demo** the first time: it makes two synthetic spectra with known
@@ -200,7 +200,7 @@ Actions tab). To build on your own PC instead, run `packaging\build_windows.bat`
 
 ## Changing the fitting (for developers)
 
-* **Fit and grading settings** are in the `SETTINGS` block at the top of `mancq/engine.py`, each with a comment.
+* **Fit and grading settings** are in the `SETTINGS` block at the top of `mancq/settings.py`, each with a comment.
 * **Re-grade without refitting**: after changing grading settings, run
   `python -m mancq regrade path/to/results` (seconds rather than minutes per spectrum). Manual adjustments are
   kept.

@@ -70,7 +70,7 @@ def make_spectrum(sf=600.13, seed=1, lw_hz=1.0, eta=0.7, cache_dir=".mancq_cache
     si, sw_ppm, ppm0 = 65536, 14.0, 11.5
     ppm = ppm0 - np.arange(si) * sw_ppm / si
     x = ppm[::-1]                                     # ascending for the model functions
-    lib = q.prepare_library(q.build_library(sf, os.path.join(q.HERE, "library"), cache_dir, S=q.Settings()), sf)
+    lib = q.prepare_library(q.build_library(sf, os.path.join(q.HERE, "library"), cache_dir, S=q.Settings()), sf, S=q.Settings())
     names = [c["name"] for c in lib]
     tsp_area = 1.0e9
     y = np.zeros(si)
@@ -86,7 +86,7 @@ def make_spectrum(sf=600.13, seed=1, lw_hz=1.0, eta=0.7, cache_dir=".mancq_cache
         if near_limit and not c["titratable"] and met not in q.SETTINGS["OFFSET_ANCHORS"]:
             d = rng.choice([-1, 1]) * rng.uniform(5.5, 6.5) / sf
         for m in c["mults"]:
-            y += mm * per_proton * q.mcol(x, m["ppm"], m["inten"], d, fw * rng.uniform(0.95, 1.2), eta)
+            y += mm * per_proton * q.mcol(x, m["ppm"], m["inten"], d, fw * rng.uniform(0.95, 1.2), eta, half=q.SETTINGS["LINE_WINDOW_PPM"])
     for pos, mm in singlets:
         y += mm * per_proton * q.pv(x, pos, fw * 1.1, eta)
     if phase_deg:
@@ -105,7 +105,7 @@ def make_fid(sf=600.13, seed=2, lw_hz=1.0, td=32768, ph0_deg=40.0, cache_dir=".m
     sw_ppm = 14.0
     sw_hz = sw_ppm * sf
     o1_ppm = 4.75                                     # carrier on water, as for presaturation
-    lib = q.prepare_library(q.build_library(sf, os.path.join(q.HERE, "library"), cache_dir, S=q.Settings()), sf)
+    lib = q.prepare_library(q.build_library(sf, os.path.join(q.HERE, "library"), cache_dir, S=q.Settings()), sf, S=q.Settings())
     names = [c["name"] for c in lib]
     t = np.arange(td // 2) / sw_hz
     per_proton = 1.0 / 9 / REF_MM

@@ -29,6 +29,8 @@ from matplotlib import rc_context
 from scipy.signal import find_peaks
 
 from . import engine as q
+import logging
+_log = logging.getLogger("mancq")      # see mancq.log (window) or the console
 
 TEMPLATES = {"representative": "Representative spectrum", "fit": "Fit evidence",
              "stack": "Time course (stacked)", "overlay": "Overlay with inset"}
@@ -322,7 +324,7 @@ class Results:
                 p = twod._jcamp(os.path.join(d, "acqus")).get("PULPROG", "")
                 return str(p).strip("<> ") or None
         except Exception:
-            pass
+            _log.debug("pulse programme not found for the figure caption", exc_info=True)
         return None
 
     def tier(self, metabolite, s):

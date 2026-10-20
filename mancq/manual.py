@@ -77,7 +77,7 @@ class SampleFit:
         pl = bool(d["pluronic"]) if "pluronic" in d else True
         self.S = q.Settings.load(out)              # the settings this run was fitted with
         self.lib = q.prepare_library(q.build_library(self.sf, libdir, os.path.join(out, "_cache"), S=self.S),
-                                     self.sf, pl)
+                                     self.sf, pl, S=self.S)
         self.names = [c["name"] for c in self.lib]
         self.index = {n: k for k, n in enumerate(self.names)}
         _, self.MP = rs.load_fit(out, smp, self.lib)
@@ -107,7 +107,7 @@ class SampleFit:
             m = self.MP[i]
             a = float(m.get("global_amp", 0.0))
             if a > 0:
-                out += a * q.mcol(self.x, m["p"], m["it"], m["d"], self.fw0 * m["wf"], eta)
+                out += a * q.mcol(self.x, m["p"], m["it"], m["d"], self.fw0 * m["wf"], eta, half=self.S["LINE_WINDOW_PPM"])
                 any_ = True
         return out if any_ else None
 
@@ -135,7 +135,7 @@ class SampleFit:
                 m = self.MP[i]
                 a = float(m.get("global_amp", 0.0))
                 if a > 0:
-                    c += a * q.mcol(x, m["p"], m["it"], m["d"], self.fw0 * m["wf"], self.eta)
+                    c += a * q.mcol(x, m["p"], m["it"], m["d"], self.fw0 * m["wf"], self.eta, half=self.S["LINE_WINDOW_PPM"])
             return c
         return float(edit.get("conc_mM", 0.0)) / self.cf * self.unit(name, edit, x)
 
@@ -150,7 +150,7 @@ class SampleFit:
         for i in self.MPk[k]:
             m = self.MP[i]
             d = m["d"] + (sh + float(ms.get(str(m["j"] + 1), 0.0))) / self.sf
-            out += q.mcol(x, m["p"], m["it"], d, self.fw0 * m["wf"] * wfac, self.eta)
+            out += q.mcol(x, m["p"], m["it"], d, self.fw0 * m["wf"] * wfac, self.eta, half=self.S["LINE_WINDOW_PPM"])
         return out
 
     def current(self, name, edits=None):
@@ -361,7 +361,7 @@ def update_results(out, samples=None, log=print):
     qc = [pd.read_csv(os.path.join(per, f"{s}_qc.csv"), dtype={"sample": str}).iloc[0].to_dict() for s in done]
     sf = float(qc[0]["SF_MHz"])
     lib = q.prepare_library(q.build_library(sf, S["LIBRARY_DIR"] or os.path.join(q.HERE, "library"),
-                                            os.path.join(out, "_cache"), S=S), sf, True)
+                                            os.path.join(out, "_cache"), S=S), sf, True, S=S)
     log(f"Applying manual adjustments to {out} ...")
     G = q.aggregate_outputs(out, grades, peaks, obs, qc, lib, done, log, S=S)
     return G

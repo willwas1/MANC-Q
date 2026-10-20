@@ -12,12 +12,12 @@ em dashes in anything you write for him.
   only in `pyproject.toml` (MANC-Q reads it from there, or from the installed package's metadata). Set it with
   `python packaging/set_version.py X.Y.Z`, which also copies it into `CITATION.cff` (with today's date),
   `packaging/installer.iss` and the first line of `constraints.txt`. Add an entry at the top of `CHANGES.md`.
-* Settings: `SETTINGS` at the top of `engine.py` are the defaults and are never changed while MANC-Q runs. Each
+* Settings: `SETTINGS` at the top of `settings.py` are the defaults and are never changed while MANC-Q runs. Each
   run makes its own `Settings` object and passes it to every function that needs it (as `S=`); it is saved in
   `_per_sample/run_settings.json` and read back with `Settings.load(out)`. Reading results folders, including
   everything needed for older ones, goes through `mancq/results.py` (`load_results`, `load_fit`); raise
-  `RESULTS_FORMAT` in `engine.py` when the folder layout changes.
-* Line endings: keep each file's existing ending when editing (`mancq/engine.py` is LF, `gui/app.py` CRLF).
+  `RESULTS_FORMAT` in `settings.py` when the folder layout changes.
+* Line endings: keep each file's existing ending when editing (the engine modules in `mancq/` are LF, `mancq/gui/*.py` CRLF).
 * Commit each version separately with a clear message, tag it `vX.Y.Z`, and only push or publish a release
   when Will says so. Publishing a GitHub release runs `.github/workflows/build-windows.yml`, which builds and
   attaches `MANC-Q-setup.exe`, a portable zip and `SHA256SUMS.txt`.
@@ -27,23 +27,28 @@ em dashes in anything you write for him.
 
 ## Layout
 
-* `mancq/engine.py` fitting and grading (SETTINGS block at the top); `spinsim.py` spin simulation;
-  `fidproc.py` raw FID processing; `regrade.py`; `results.py`; `demo.py` synthetic demo and its checks
+* `mancq/settings.py` the default settings (SETTINGS block at the top), `Settings`, version, tier names;
+  `io.py` reading spectra and files, results-folder checks; `library.py` the compound library; `fit.py`
+  fitting one spectrum; `grade.py` tiers; `report.py` tables, workbook, PDFs, QC flag; `engine.py` runs them
+  for a folder (`run`) and re-exports every name, so `mancq.engine.X` still works. `spinsim.py` spin
+  simulation; `fidproc.py` raw FID processing; `regrade.py`; `results.py`; `demo.py` synthetic demo and its checks
   (EXPNO 10, 11, 13, 14); `shortcut.py` Windows desktop shortcut; `__main__.py` command line
   (`mancq` with no arguments opens the window).
-* `mancq/gui/app.py` PySide6 window (8 steps: Spectra, Process spectra, Regions, Settings, Run, Results,
-  Review, Figures); `gui/runner.py` runs the fit in a separate process; `gui/figures_tab.py` the Figures
+* `mancq/gui/app.py` PySide6 main window (8 steps: Spectra, Process spectra, Regions, Settings, Run, Results,
+  Review, Figures), one file per step (`gui/spectra_step.py` ... `gui/review_step.py`), shared helpers in
+  `gui/common.py`; `gui/runner.py` runs the fit in a separate process; `gui/figures_tab.py` the Figures
   step, drawn by `mancq/figures.py` (templates, forgiving sample sheet reader, own TIFF writer because
   Anaconda's Pillow crashes on compressed TIFFs).
 * `mancq/shifttable.py` chemical shift assignment table (chemical_shift_assignments.xlsx), written with
   every results update.
 * `tests/`: checks on synthetic data only, run with `python -m pytest tests` (each file also runs on its own:
-  pH estimate, figures, shift table, overwrite warning, subset rerun, results tables).
+  pH estimate, figures, shift table, overwrite warning, subset rerun, results tables, QC, results format).
 * `mancq/library/`: `compounds.csv` (149 compounds: 123 GISSMO, 25 CASMDB peak lists, 1 literature spin
   system), `gissmo_spin_systems.txt`, `other_spin_systems.txt`, `peaklists.csv`, `peaklists_manifest.csv`.
 * `MANC-Q.bat` double-click launcher (downloads uv + private Python into `.runtime`); `constraints.txt` exact
-  tested package versions; `packaging/` PyInstaller and Inno Setup build; `docs/` quick start, command line,
-  screenshots (from the synthetic demo only).
+  tested package versions; `packaging/` PyInstaller and Inno Setup build, `set_version.py`;
+  `mancq/help/QUICKSTART_GUI.md` the one copy of the quick start and its screenshots (synthetic demo only; also
+  the window's Help); `docs/COMMAND_LINE.md`.
 
 ## Checking a change
 
@@ -65,7 +70,7 @@ em dashes in anything you write for him.
   in both modes. Keep text contrast at 4.5:1 or better. `MANCQ_THEME=dark|light` overrides the choice.
 * Logo: merge 2 chosen by Will (lactate quartet, white line over gold fitted area, purple tile). Drawn by
   `packaging/make_logo.py` (needs PySide6 + Pillow) into `mancq/gui/assets/` (SVG, PNGs, mancq.ico) and the
-  docs/help `logo.png`; re-run it after changing the drawing. Never use the University of Manchester crest.
+  `mancq/help/images/logo.png`; re-run it after changing the drawing. Never use the University of Manchester crest.
 
 ## Known open items
 
