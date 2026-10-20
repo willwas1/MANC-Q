@@ -118,4 +118,10 @@ From Python or a notebook:
 ```python
 import mancq
 mancq.run("experiment_folder", "results", ref_mm=0.5, dilution=1.0)
+# a results folder that already has results: existing="overwrite" or existing="resume" (as on the command line)
+# any setting can be changed for one run by name, e.g. a stricter quantification limit:
+mancq.run("experiment_folder", "results_loq20", ref_mm=0.5, LOQ_SNR=20)
 ```
+
+From version 2.0 each run has its own settings (`mancq.Settings`); the defaults in `mancq/settings.py` are
+never changed by a run, and a misspelt setting name is an error.

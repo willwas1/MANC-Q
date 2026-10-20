@@ -2,6 +2,30 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 2.0.0 (20 October 2026)
+
+MANC-Q 2.0 brings together the fixes from the review of 1.8.0 (versions 1.8.1 to 1.11.1 below). In short:
+
+* **Results you can trust not to be stale:** a folder with results is never silently reused (1.8.1).
+* **Bounds are not values:** "Upper bound only" is blank in the value tables, and "Not detected" is 0 mM with a
+  plain note on what that means (1.8.2).
+* **Better grading:** compounds that are not in the sample no longer take signal from those that are, and a
+  reporter peak must agree with the rest of its molecule (1.9.0, 1.9.1). **Rerun data you plan to publish**,
+  especially creatine, choline and the 3.19 to 3.27 ppm region.
+* **Checks:** a demo that checks itself on four synthetic spectra, 25 automatic tests run on every change, a
+  quality flag for every spectrum, and clearer warnings (1.9.1, 1.9.2).
+* **Built to last:** settings per run, a results-folder format number, a library check, one version number,
+  and the engine and window split into readable parts (1.10.0, 1.11.0).
+
+Why 2.0 rather than 1.12: some changes are not backwards compatible.
+
+* Results folders made by 2.0 (format 2) cannot be opened by MANC-Q 1.x; 2.0 still opens 1.x folders.
+* Python 3.12 or later is needed (it was 3.9). Anaconda with Python 3.13 works.
+* For your own Python scripts: the engine's functions now take the settings as a keyword argument (`S=`), and
+  the defaults moved to `mancq/settings.py`. `mancq.run(...)` works as before.
+
+The numbers in this version are those of 1.11.1.
+
 ## 1.11.1 (20 October 2026)
 
 * **The window over which each line is computed is now set in Hz (`LINE_WINDOW_HZ`, 36 Hz) instead of ppm**,

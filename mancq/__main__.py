@@ -53,7 +53,8 @@ def main(argv=None):
                         "re-used if nothing that affects them has changed")
     r.add_argument("--no-resume", action="store_true", help="with --resume: fit every spectrum again anyway")
 
-    d = sub.add_parser("demo", help="make synthetic spectra (one processed, one raw FID) of known composition and quantify them")
+    d = sub.add_parser("demo", help="make synthetic spectra of known composition (processed, raw FID and two harder "
+                                    "cases), quantify them and check the results (exit code 1 if a check fails)")
     d.add_argument("output", nargs="?", default="mancq_demo", help="demo folder (default ./mancq_demo)")
     d.add_argument("--field", type=float, default=600.13, help="spectrometer frequency to simulate, MHz")
     d.add_argument("--quick", action="store_true", help="only EXPNO 10 and 13 (faster; used by the automatic tests)")

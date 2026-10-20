@@ -30,6 +30,25 @@ standard. No spiked standards and no calibration curves are needed.
 
 ![MANC-Q results screen](mancq/help/images/6_results.png)
 
+### New in version 2.0
+
+* **No silent re-use of old results.** A results folder that already has results is never quietly reused:
+  the window asks (new subfolder, overwrite, or carry on a stopped run), and the command line stops unless you
+  add `--overwrite` or `--resume`. Up to 1.8.0, changing the TSP concentration or other settings and running
+  into the same folder could give the old values.
+* **Upper bounds are never stored as values.** "Upper bound only" is blank in the value tables (the bound is
+  shown as `<=value`); "Not detected" is recorded as 0 mM, with a note on what a zero means.
+* **Better grading.** Library compounds that are not in the sample no longer take signal from those that are
+  (in the synthetic demo this had made choline 18 % and creatine 5 % low), and a reporter peak must agree with
+  the rest of its molecule to be Quantified. **Rerun data you plan to publish with 2.0**, especially creatine,
+  choline and the 3.19 to 3.27 ppm region.
+* **A quality flag for every spectrum** (shimming, fit, phase error, relaxation delay, TSP binding), shown above
+  each column in the Results step.
+* **A demo that checks itself** on four synthetic spectra, including hard cases, and automatic tests on every
+  change.
+
+See [CHANGES.md](CHANGES.md) for the details of every version.
+
 ## Get started on Windows
 
 You do not need Python or anything else installed. Pick one of these.
@@ -148,7 +167,11 @@ sheet. Each value has a confidence tier:
 | Not measurable | all its peaks are in a region you chose to leave out | `n/m` |
 
 Always read the tier with the number. "1.2 mM, Quantified" is a measurement; "<=1.2 mM, Upper bound" only says
-it is not more than 1.2 mM. When a value looks surprising, open `overlay_sample_<EXPNO>.pdf`, which shows the
+it is not more than 1.2 mM, so upper bounds are left blank in the value tables (Concentration_mM_all,
+`concentrations_long.csv`) and never enter the means on the Summary sheet. Metabolites graded Not detected are
+recorded as 0 mM. A zero means the signal was below this sample's detection limit (LOD_mM). It may reflect true
+absence, a concentration too low to detect, or a peak MANC-Q could not resolve in that spectrum. It is not proof
+that the metabolite is absent. When a value looks surprising, open `overlay_sample_<EXPNO>.pdf`, which shows the
 measured spectrum, the fit and each compound's contribution.
 
 ## If something goes wrong
@@ -182,7 +205,7 @@ if there is one, the `run_log.txt` file from the results folder.
 The same program can be used from the command line, from scripts and from notebooks; see
 [docs/COMMAND_LINE.md](docs/COMMAND_LINE.md).
 
-* With Python 3.9 or later: `pip install git+https://github.com/willwas1/MANC-Q.git`, then `mancq` (opens the
+* With Python 3.12 or later: `pip install git+https://github.com/willwas1/MANC-Q.git`, then `mancq` (opens the
   window) or `mancq --help`. On Windows, `mancq shortcut` puts a desktop shortcut that opens the window.
 * On a Mac or Linux without Python: install uv (`curl -LsSf https://astral.sh/uv/install.sh | sh`), then run
   `uvx --python 3.12 --from git+https://github.com/willwas1/MANC-Q mancq`. MANC-Q is developed and tested on
@@ -218,8 +241,13 @@ Actions tab). To build on your own PC instead, run `packaging\build_windows.bat`
 * **Using it from Python**:
   ```python
   import mancq
-  mancq.run("experiment_folder", "results", ref_mm=0.5, dilution=1.0)
+  mancq.run("experiment_folder", "results", ref_mm=0.5, dilution=1.0)          # settings by name: LOQ_SNR=20
+  from mancq.regrade import regrade
+  regrade("results", LOQ_SNR=8)                                                # grading settings only
   ```
+  From 2.0 each run makes its own `mancq.Settings` and passes it to every function that needs it (`S=`); the
+  functions of `mancq.engine` (now split into `settings`, `io`, `library`, `fit`, `grade`, `report`) take it as
+  a keyword argument, for example `mancq.read_spectrum(folder, 1, S=mancq.Settings())`.
 
 ## How it works, in more detail
 
