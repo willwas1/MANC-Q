@@ -2,6 +2,10 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 2.0.1 (20 October 2026)
+
+The quick start screenshots (mancq/help/images, also shown by the window's Help and the README) are retaken from MANC-Q 2.0.1 with the synthetic demo. They now show the File menu, the warning when the results folder already has results, the "Load from a file..." and "Paste from Excel" dilution buttons, all four demo spectra and the "QC: check" label above EXPNO 14 in Results. They are 1280 x 880 pixels (the window cannot be shorter any more). Nothing in the calculation has changed.
+
 ## 2.0.0 (20 October 2026)
 
 MANC-Q 2.0 brings together the fixes from the review of 1.8.0 (versions 1.8.1 to 1.11.1 below). In short:
