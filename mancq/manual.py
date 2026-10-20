@@ -107,7 +107,7 @@ class SampleFit:
             m = self.MP[i]
             a = float(m.get("global_amp", 0.0))
             if a > 0:
-                out += a * q.mcol(self.x, m["p"], m["it"], m["d"], self.fw0 * m["wf"], eta, half=self.S["LINE_WINDOW_PPM"])
+                out += a * q.mcol(self.x, m["p"], m["it"], m["d"], self.fw0 * m["wf"], eta, half=self.S["LINE_WINDOW_HZ"] / self.sf)
                 any_ = True
         return out if any_ else None
 
@@ -135,7 +135,7 @@ class SampleFit:
                 m = self.MP[i]
                 a = float(m.get("global_amp", 0.0))
                 if a > 0:
-                    c += a * q.mcol(x, m["p"], m["it"], m["d"], self.fw0 * m["wf"], self.eta, half=self.S["LINE_WINDOW_PPM"])
+                    c += a * q.mcol(x, m["p"], m["it"], m["d"], self.fw0 * m["wf"], self.eta, half=self.S["LINE_WINDOW_HZ"] / self.sf)
             return c
         return float(edit.get("conc_mM", 0.0)) / self.cf * self.unit(name, edit, x)
 
@@ -150,7 +150,7 @@ class SampleFit:
         for i in self.MPk[k]:
             m = self.MP[i]
             d = m["d"] + (sh + float(ms.get(str(m["j"] + 1), 0.0))) / self.sf
-            out += q.mcol(x, m["p"], m["it"], d, self.fw0 * m["wf"] * wfac, self.eta, half=self.S["LINE_WINDOW_PPM"])
+            out += q.mcol(x, m["p"], m["it"], d, self.fw0 * m["wf"] * wfac, self.eta, half=self.S["LINE_WINDOW_HZ"] / self.sf)
         return out
 
     def current(self, name, edits=None):

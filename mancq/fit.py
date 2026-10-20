@@ -249,7 +249,7 @@ def fit_spectrum(ppm_raw, y, sf, lib, log, *, S):
        d_m = library position + global offset + compound shift D_k + small delta_m
        w_m = linewidth factor (pseudo-Voigt, shared eta)"""
     t0 = time.time()
-    HW = S["LINE_WINDOW_PPM"]                 # each line is computed within +/-HW ppm of its centre
+    HW = S["LINE_WINDOW_HZ"] / sf             # each line is computed within +/-HW ppm of its centre
     tsp = fit_tsp(ppm_raw, y, sf, S=S)
     ppm = ppm_raw - tsp["centre"]
     noise_why = []

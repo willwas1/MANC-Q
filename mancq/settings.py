@@ -70,7 +70,8 @@ SETTINGS = dict(
     UNKNOWN_BLOCK_SNR=10,         # ... and not within UNKNOWN_EXCLUSION_HZ of a fitted library line
     UNKNOWN_EXCLUSION_HZ=3.0,
     COMPOUND_TIE=0.3,             # soft constraint: equal per-proton amplitude of multiplets in a compound
-    LINE_WINDOW_PPM=0.06,         # each line is computed this far either side of its centre (36 Hz at 600 MHz)
+    LINE_WINDOW_HZ=36.0,          # each line is computed this far either side of its centre (0.06 ppm at 600 MHz;
+                                  # in Hz, so the same physical width at any field)
     MULTIPLET_GAP_HZ=60.0,        # library lines of one proton group closer than this form one multiplet ...
     MULTIPLET_MAX_SPAN_PPM=0.10,  # ... and a group wider than this is split at its largest gap
     GLUCOSE_ALPHA_FRACTION=0.36,  # share of alpha-D-glucose at equilibrium in water (the rest is beta)

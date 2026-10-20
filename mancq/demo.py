@@ -86,7 +86,7 @@ def make_spectrum(sf=600.13, seed=1, lw_hz=1.0, eta=0.7, cache_dir=".mancq_cache
         if near_limit and not c["titratable"] and met not in q.SETTINGS["OFFSET_ANCHORS"]:
             d = rng.choice([-1, 1]) * rng.uniform(5.5, 6.5) / sf
         for m in c["mults"]:
-            y += mm * per_proton * q.mcol(x, m["ppm"], m["inten"], d, fw * rng.uniform(0.95, 1.2), eta, half=q.SETTINGS["LINE_WINDOW_PPM"])
+            y += mm * per_proton * q.mcol(x, m["ppm"], m["inten"], d, fw * rng.uniform(0.95, 1.2), eta, half=q.SETTINGS["LINE_WINDOW_HZ"] / sf)
     for pos, mm in singlets:
         y += mm * per_proton * q.pv(x, pos, fw * 1.1, eta)
     if phase_deg:

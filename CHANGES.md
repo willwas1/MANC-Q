@@ -2,6 +2,16 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 1.11.1 (20 October 2026)
+
+* **The window over which each line is computed is now set in Hz (`LINE_WINDOW_HZ`, 36 Hz) instead of ppm**,
+  so it is the same physical width at any field. Before, it was 0.06 ppm: 36 Hz at 600 MHz but 48 Hz at
+  800 MHz. At 600 MHz this moves the line tails by a hair (0.00001 ppm), which is enough to change some
+  values slightly. Demo, before and after: medians unchanged; the largest change of a true compound is
+  1.6 % (choline in the hardest spectrum, EXPNO 14), and every other is under 1.1 %. Two tiers changed:
+  threonine in EXPNO 13 is now Quantified, phenylalanine in EXPNO 14 now Overlapped. The demo check passes.
+  Spectra at other fields change a little more, because the window there was not 36 Hz before.
+
 ## 1.11.0 (20 October 2026)
 
 Split and slim. No change in results: the demo gives exactly the same values, digit for digit, as 1.9.2

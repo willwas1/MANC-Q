@@ -49,7 +49,7 @@ def grade(res, lib, sf, cf, *, S):
                 self_contra[id(m)] = gone
                 ok_amp = False
                 centre = float((m["p"] * m["it"]).sum() / m["it"].sum() + m["d"])
-                partner = _main_partner(res, k, centre, S["LINE_WINDOW_PPM"])
+                partner = _main_partner(res, k, centre, S["LINE_WINDOW_HZ"] / sf)
                 if partner is not None and res["amp"][k] > 0:
                     notes.setdefault(lib[partner]["name"], []).append((c["name"],
                         f"{c['name']} (graded without a value) is fitted on its peak at {centre:.3f} ppm although "
