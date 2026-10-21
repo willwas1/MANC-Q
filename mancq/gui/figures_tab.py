@@ -20,7 +20,9 @@ from mancq import figures as F
 from mancq.gui import theme
 
 LABEL_TIERS = [("Quantified", "Quantified"), ("Overlapped", "Overlapped (semi-quantitative)"),
-               ("Estimate", "Deconvolution estimate (low confidence)"), ("Manual", "Manually adjusted")]
+               ("Estimate", "Deconvolution estimate (low confidence)"), ("Manual", "Manually adjusted"),
+               ("Upper bound", "Upper bound only"), ("Not detected", "Not detected")]
+VALUE_TIERS = [t for _, t in LABEL_TIERS[:4]]      # the tiers that give a value; the other two are drawn on request
 WHICH = [("Main peak of each metabolite", "main"), ("All its reporter peaks", "reporter"), ("All its peaks", "all")]
 STYLES = [("Numbers (key in the caption)", "numbers"), ("Abbreviations", "abbrev"), ("No labels", "off")]
 
@@ -156,7 +158,9 @@ class FiguresTab(QWidget):
         l2.addWidget(self.inset_lab, 7, 0); l2.addWidget(self.inset, 7, 1, 1, 2)
         self.fit_lab = QLabel("Metabolites (one row each)")
         self.fit_mets = QListWidget(); self.fit_mets.setMinimumHeight(110)
-        self.fit_mets.setToolTip("Tick the metabolites to draw on their own rows, e.g. lactate and threonine")
+        self.fit_mets.setToolTip("Tick the metabolites to draw on their own rows, e.g. lactate and threonine. Every "
+                                 "metabolite is listed: those with a value first, then those that are only an upper "
+                                 "bound or not detected (marked, and named as such in the figure and caption)")
         self.fit_reg_lab = QLabel("ppm shown")
         self.fit_region = QLineEdit(); self.fit_region.setToolTip("Leave empty to show the chosen metabolites' main "
                                                                   "peaks, or type e.g. 1.25-1.40, 4.05-4.16")
@@ -172,17 +176,18 @@ class FiguresTab(QWidget):
         l3.addWidget(QLabel("Label"), 1, 0)
         self.tier_boxes = []
         for i, (lab, t) in enumerate(LABEL_TIERS):
-            cb = QCheckBox(lab); cb.setToolTip(f"Label metabolites graded {t}")
+            cb = QCheckBox(lab); cb.setToolTip(f"Label metabolites graded {t}" + (
+                " (no value, so the caption says so)" if t not in VALUE_TIERS else ""))
             self.tier_boxes.append((cb, t)); l3.addWidget(cb, 1 + i // 2, 1 + i % 2)
         self.which = QComboBox()
         for lab, k in WHICH:
             self.which.addItem(lab, k)
-        l3.addWidget(QLabel("Peaks"), 3, 0); l3.addWidget(self.which, 3, 1, 1, 3)
+        l3.addWidget(QLabel("Peaks"), 4, 0); l3.addWidget(self.which, 4, 1, 1, 3)
         be = QPushButton("Edit labels..."); be.clicked.connect(self.edit_labels)
         be.setToolTip("Change the text, hide a label, add symbols (* contaminant, ~ cut-off peak, # 13C satellite), "
                       "brackets over multiplets, or your own labels")
         self.n_labels = QLabel("")
-        l3.addWidget(be, 4, 0, 1, 2); l3.addWidget(self.n_labels, 4, 2, 1, 2)
+        l3.addWidget(be, 5, 0, 1, 2); l3.addWidget(self.n_labels, 5, 2, 1, 2)
         lay.addWidget(g3)
 
         g4 = QGroupBox("4  Size and export"); l4 = QGridLayout(g4)
@@ -310,14 +315,22 @@ class FiguresTab(QWidget):
         self.replicate.clear(); self.replicate.addItems(reps or ["(none)"])
         self.mode_one.setEnabled(bool(reps)); self.replicate.setEnabled(bool(reps))
         G = self.R.long
-        good = G[G.tier.isin([t for _, t in LABEL_TIERS])]
+        good = G[G.tier.isin(VALUE_TIERS)]
         mets = list(good.groupby("metabolite").conc_mM.median().sort_values(ascending=False).index)
-        mets = [m for m in mets if not m.startswith("Pluronic")]
+        weak = G[~G.metabolite.isin(mets)]                 # no value in any sample: listed after, marked
+        ub = weak[weak.tier == "Upper bound only"].metabolite.unique()
+        rest = sorted(ub) + sorted(set(weak.metabolite) - set(ub))
         chosen = set(self.spec.get("fit_metabolites") or [])
         self.fit_mets.clear()
-        for m in mets:
-            it = QListWidgetItem(m); it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+        for m in mets + rest:
+            if m.startswith("Pluronic"):
+                continue
+            note = "" if m in mets else "   (upper bound only)" if m in ub else "   (not detected)"
+            it = QListWidgetItem(m + note); it.setData(Qt.UserRole, m)
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
             it.setCheckState(Qt.Checked if m in chosen else Qt.Unchecked)
+            if note:
+                it.setForeground(QBrush(QColor(theme.T("muted"))))
             self.fit_mets.addItem(it)
         self.loading = False
 
@@ -370,7 +383,7 @@ class FiguresTab(QWidget):
         s["baseline_correct"], s["show_fit"] = self.baseline.isChecked(), self.show_fit.isChecked()
         s["label_style"], s["label_which"] = self.style.currentData(), self.which.currentData()
         s["label_tiers"] = [t for cb, t in self.tier_boxes if cb.isChecked()]
-        s["fit_metabolites"] = [self.fit_mets.item(i).text() for i in range(self.fit_mets.count())
+        s["fit_metabolites"] = [self.fit_mets.item(i).data(Qt.UserRole) for i in range(self.fit_mets.count())
                                 if self.fit_mets.item(i).checkState() == Qt.Checked]
         s["width_mm"], s["height_mm"] = self.width.value(), self.height.value()
         s["font_pt"], s["line_pt"] = self.font.value(), self.line.value()
@@ -429,8 +442,11 @@ class FiguresTab(QWidget):
         P = self.R.peaks[(self.R.peaks["sample"] == s) & self.R.peaks.metabolite.isin(self.spec["fit_metabolites"])]
         if not len(P):
             return None
-        rows = P[P.used_as_reporter.astype(bool)] if P.used_as_reporter.astype(bool).any() else P
-        parts = [(float(r.from_ppm) - 0.03, float(r.to_ppm) + 0.03) for r in rows.itertuples()]
+        parts = []
+        for _, sub in P.groupby("metabolite"):          # its reporter peaks, else (an upper bound) its tallest one
+            rep = sub.used_as_reporter.astype(bool)
+            rows = sub[rep] if rep.any() else sub[sub.height_snr == sub.height_snr.max()].head(1)
+            parts += [(float(r.from_ppm) - 0.03, float(r.to_ppm) + 0.03) for r in rows.itertuples()]
         parts.sort()
         merged = [list(parts[0])]
         for a, b in parts[1:]:
@@ -593,19 +609,23 @@ class SheetDialog(QDialog):
         super().__init__(parent)
         self.R = R
         self.setWindowTitle("Samples and groups")
-        self.resize(980, 620)
+        self.setSizeGripEnabled(True)
+        _A().fit_to_screen(self, 980, 620)
         v = QVBoxLayout(self)
-        v.addWidget(QLabel(
+        intro = QLabel(
             "Replicates of the same <b>group</b> at the same <b>time</b> become one line in a figure (their mean, or "
             "the replicate you pick). Type in the table, paste a column from Excel (select the first cell, Ctrl+V), "
             "or load a sample sheet. A sample sheet is a CSV or Excel file with one row per sample and columns such "
             "as <i>sample</i> (or EXPNO), <i>group</i> (or condition, reactor), <i>time_h</i> (12, 12 h, 2 d and "
             "day 3 all work), <i>replicate</i> and <i>label</i>. Extra columns (feed, VCD, viability, ...) are kept. "
-            "Small mistakes are reported, not refused."))
+            "Small mistakes are reported, not refused.")
+        intro.setWordWrap(True)             # unwrapped, this one line made the window wider than the screen
+        v.addWidget(intro)
         self.msg = QLabel(""); self.msg.setWordWrap(True); theme.role(self.msg, "warn")
         v.addWidget(self.msg)
         h = QHBoxLayout()
-        bl = QPushButton("Load sample sheet (CSV or Excel)..."); bl.clicked.connect(self.load)
+        bl = QPushButton("Load sample sheet..."); bl.clicked.connect(self.load)
+        bl.setToolTip("Load a CSV or Excel file with one row per sample")
         bt = QPushButton("Save a sheet to fill in..."); bt.clicked.connect(self.save_template)
         bt.setToolTip("Writes a CSV with your samples and their NMR titles, ready to fill in Excel and load back")
         bc = QPushButton("Clear groups"); bc.clicked.connect(self.clear)
@@ -615,6 +635,7 @@ class SheetDialog(QDialog):
         self.table = QTableWidget(0, len(self.cols))
         self.table.setHorizontalHeaderLabels([self.HEAD.get(c, c) for c in self.cols])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.table.setMinimumHeight(120)
         self.table.installEventFilter(self)
         v.addWidget(self.table, 1)
         self.show_sheet(sheet)
@@ -640,6 +661,8 @@ class SheetDialog(QDialog):
                     it.setForeground(QBrush(QColor(theme.T("muted"))))
                 self.table.setItem(i, j, it)
         self.table.resizeColumnsToContents()
+        for j in range(self.table.columnCount()):       # a long note or title must not push the rest off screen
+            self.table.setColumnWidth(j, min(self.table.columnWidth(j), 260))
 
     def result_sheet(self):
         rows = []
@@ -712,12 +735,15 @@ class LabelDialog(QDialog):
         super().__init__(parent)
         self.reset = False
         self.setWindowTitle("Peak labels")
-        self.resize(760, 560)
+        self.setSizeGripEnabled(True)
+        _A().fit_to_screen(self, 760, 560)
         v = QVBoxLayout(self)
-        v.addWidget(QLabel("Labels come from MANC-Q's fit (metabolite at its fitted peak position). Untick to hide "
+        intro = QLabel("Labels come from MANC-Q's fit (metabolite at its fitted peak position). Untick to hide "
                            "one, change the text (used when the style is Abbreviations), add a symbol (* contaminant "
                            "or poloxamer, ~ peak cut off, # 13C satellite: each is explained in the caption) or a "
-                           "bracket over a multiplet. <b>Add a label</b> puts your own text at any ppm."))
+                           "bracket over a multiplet. <b>Add a label</b> puts your own text at any ppm.")
+        intro.setWordWrap(True)
+        v.addWidget(intro)
         self.table = QTableWidget(0, len(self.COLS))
         self.table.setHorizontalHeaderLabels(self.COLS)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
@@ -790,7 +816,7 @@ class ExportDialog(QDialog):
         super().__init__(parent)
         self.spec, self.out, self.cap, self.sheet = spec, out, caption, sheet
         self.setWindowTitle("Export figure")
-        self.resize(560, 420)
+        _A().fit_to_screen(self, 560, 420)
         v = QVBoxLayout(self)
         h = QHBoxLayout(); h.addWidget(QLabel("Save as"))
         name = f"figure_{spec['template']}_{int(spec['width_mm'])}mm"

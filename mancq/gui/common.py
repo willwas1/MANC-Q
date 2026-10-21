@@ -219,6 +219,15 @@ def heading(text, sub=None):
     return box
 
 
+def fit_to_screen(dlg, w, h):
+    """Open a dialog at w x h pixels, or smaller if the screen is (laptops, 125 % or 150 % Windows scaling)."""
+    scr = dlg.screen() or QApplication.primaryScreen()
+    if scr is not None:
+        av = scr.availableGeometry()
+        w, h = min(w, int(av.width() * 0.92)), min(h, int(av.height() * 0.88))
+    dlg.resize(w, h)
+
+
 def primary(text):
     b = QPushButton(text)
     b.setObjectName("primary")

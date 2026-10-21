@@ -251,10 +251,14 @@ peak is marked ~). For the time course and the overlay, **Offset upwards** raise
 one before (a share of the plot height; 0 = on top of each other) and **Offset sideways** moves each one to
 the right by a number of ppm, for a staggered, angled stack. With a sideways offset the ppm scale belongs to
 the first (bottom) spectrum, and the caption says so. Fit evidence has its own list of metabolites and its own ppm range (empty = around the main
-peaks of the metabolites you ticked).
+peaks of the metabolites you ticked). The list has every metabolite: those with a value first, then (in grey)
+those that are only an upper bound or not detected, so you can still show, for example, why glutamine is only an
+upper bound. The figure marks them `<=` or `n.d.` and the caption says they have no value.
 
 **3 Labels.** Labels come from MANC-Q's own fit: the metabolites graded as you tick (Quantified by default),
-at their fitted peak positions: by default one label per metabolite, at its main peak. **Numbers** puts
+at their fitted peak positions: by default one label per metabolite, at its main peak. Tick **Upper bound** or
+**Not detected** to label those metabolites too; the caption then says they are labelled for reference only,
+with no value from MANC-Q. **Numbers** puts
 numbers on the plot and the key in the caption; **Abbreviations** writes Lac, Ala, Glc and so on. Crowded
 labels are moved up and joined to their peak by a thin line, and wide multiplets get a bracket. **Edit
 labels...** lets you hide a label, change its text, add a symbol (`*` contaminant or poloxamer, `~` peak cut

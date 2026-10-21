@@ -2,6 +2,19 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 2.0.2 (21 October 2026)
+
+Figures step:
+
+* **Samples and groups** (the sample sheet window) and **Edit labels** no longer open wider than the screen: their
+  long explanation now wraps, very wide columns (long notes or titles) are capped, and every Figures window
+  opens no bigger than the screen and can be resized from its corner.
+* **Any metabolite can be drawn.** Fit evidence now lists every metabolite: those with a value first, then those
+  that are only an upper bound or not detected in every sample (for example glutamine), marked in grey. Labels
+  have two more boxes, **Upper bound** and **Not detected**. A metabolite with no reporter peak is labelled at its
+  tallest peak. The figure shows `<=` value or `n.d.`, and the caption says that these metabolites are drawn or
+  labelled for reference only, with no value from MANC-Q. Nothing in the calculation has changed.
+
 ## 2.0.1 (20 October 2026)
 
 The quick start screenshots (mancq/help/images, also shown by the window's Help and the README) are retaken from MANC-Q 2.0.1 with the synthetic demo. They now show the File menu, the warning when the results folder already has results, the "Load from a file..." and "Paste from Excel" dilution buttons, all four demo spectra and the "QC: check" label above EXPNO 14 in Results. They are 1280 x 880 pixels (the window cannot be shorter any more). Nothing in the calculation has changed.

@@ -37,6 +37,7 @@ TEMPLATES = {"representative": "Representative spectrum", "fit": "Fit evidence",
 WIDTHS_MM = {"Single column (85 mm)": 85.0, "1.5 column (120 mm)": 120.0, "Double column (180 mm)": 180.0}
 SYMBOLS = {"*": "contaminant or poloxamer", "~": "peak cut off at the top of the plot", "#": "13C satellite"}
 MIN_FONT_PT, MIN_LINE_PT = 6.0, 0.25          # preflight: smallest text and thinnest line most journals accept
+NO_VALUE = ("Upper bound only", "Not detected")   # tiers with no measured value: drawn only when asked, and said so
 # colour-blind safe colours (Okabe and Ito), for overlays and fitted components
 FIT_COLOUR = "#660099"       # Manchester purple: the default colour of the fitted (simulated) spectrum
 COLOURS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9", "#000000", "#F0E442"]
@@ -335,6 +336,11 @@ class Results:
         ub = float(r.upper_bound_mM.iloc[0]) if "upper_bound_mM" in r else np.nan
         return t, q.shown_value(t, float(r.conc_mM.iloc[0]), ub)      # the bound for Upper bound only
 
+    def has_no_value(self, metabolite, samples):
+        """True when the metabolite is only an upper bound or not detected in every one of these samples."""
+        r = self.long[(self.long.metabolite == metabolite) & self.long["sample"].isin(samples)]
+        return bool(len(r)) and bool(r.tier.isin(NO_VALUE).all())
+
 
 # ---------- traces (one line in a figure): a sample, or the mean of replicate samples
 def trace_groups(R, sheet):
@@ -398,7 +404,8 @@ def build_trace(R, entry, mode="mean", replicate=None, components=()):
 def auto_labels(R, samples, tiers=("Quantified",), which="main"):
     """Labels from MANC-Q's own fit: for every metabolite with a value in one of `tiers` in these samples, its
     tallest reporter multiplet ('main'), all its reporter multiplets ('reporter') or all its multiplets ('all'),
-    at the median fitted position.
+    at the median fitted position. A metabolite with no reporter (an upper bound, an estimate) is labelled at its
+    tallest multiplet.
     Returns a list of dicts (show, metabolite, ppm, lo, hi, text, symbol, bracket)."""
     if R.peaks is None:
         return []
@@ -409,11 +416,12 @@ def auto_labels(R, samples, tiers=("Quantified",), which="main"):
     out = []
     for m in mets:
         sub = P[P.metabolite == m]
-        if which in ("main", "reporter") and sub.used_as_reporter.astype(bool).any():
-            sub = sub[sub.used_as_reporter.astype(bool)]
-        elif which in ("main", "reporter"):
+        if not len(sub):
             continue
-        if which == "main":
+        rep = sub.used_as_reporter.astype(bool)
+        if which in ("main", "reporter") and rep.any():
+            sub = sub[rep]
+        if which == "main" or (which == "reporter" and not rep.any()):
             best = sub.groupby("multiplet").height_snr.median().idxmax()
             sub = sub[sub.multiplet == best]
         for j, g in sub.groupby("multiplet"):
@@ -946,8 +954,8 @@ def _draw_fit(fig, spec, R, tr, info):
     labs = [("measured, fit", offsets[0] + heights[0] * 0.3)]
     for k, m in enumerate(mets):
         tier, conc = R.tier(m, smp) if smp else ("", np.nan)
-        val = (f" <={conc:.2g} mM" if tier == "Upper bound only" else f" {conc:.3g} mM") \
-            if smp and np.isfinite(conc) else ""
+        val = (" n.d." if tier == "Not detected" else f" <={conc:.2g} mM" if tier == "Upper bound only"
+               else f" {conc:.3g} mM") if smp and np.isfinite(conc) else ""
         labs.append((f"{plain_name(m)}{val}", offsets[k + 1] + heights[k + 1] * 0.2))
         names.append((m, tier, conc))
     labs.append(("residual", offsets[-1] + heights[-1] * 0.3))
@@ -972,6 +980,25 @@ def _trace_desc(tr):
     if tr["mean"]:
         return f"{tr['label']} (mean of {len(tr['samples'])} spectra, EXPNO {', '.join(tr['samples'])})"
     return f"{tr['label']}" + ("" if f"EXPNO {tr['samples'][0]}" in tr["label"] else f" (EXPNO {tr['samples'][0]})")
+
+
+def _value_desc(tier, conc):
+    """', 1.2 mM, quantified' / ', upper bound only, at most 0.05 mM' / ', not detected' for the caption."""
+    if tier == "Not detected":
+        return ", not detected"
+    if not np.isfinite(conc):
+        return ""
+    if tier == "Upper bound only":
+        return f", upper bound only, at most {conc:.2g} mM"
+    return f", {conc:.3g} mM, {tier.lower()}"
+
+
+def _no_value_note(mets, how):
+    """A caption sentence saying that some metabolites shown have no measured value."""
+    names = [plain_name(m) for m in mets]
+    lst = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    return (f"{lst[0].upper() + lst[1:]} {'is' if len(names) == 1 else 'are'} {how} for reference only: MANC-Q gives "
+            f"no value for {'it' if len(names) == 1 else 'them'} in these spectra (upper bound only or not detected).")
 
 
 def caption(spec, R, traces, info):
@@ -1016,9 +1043,12 @@ def caption(spec, R, traces, info):
                      f"measured spectrum ({colour_name(trace_colour(spec, tr, 0, 'k'))}) and the sum of all fitted metabolite "
                      f"spectra ({colour_name(spec.get('fit_colour') or FIT_COLOUR)}), baseline "
                      f"removed. Below: the fitted spectrum of each metabolite on the same vertical scale"
-                     + (" (" + "; ".join(f"{plain_name(m)}{'' if not np.isfinite(c) else f', {c:.3g} mM, {tt.lower()}'}"
-                                          for m, tt, c in names) + ")" if names else "") +
+                     + (" (" + "; ".join(f"{plain_name(m)}{_value_desc(tt, c)}" for m, tt, c in names) + ")"
+                        if names else "") +
                      ". Bottom: residual (measured minus fit, grey).")
+        weak = [m for m, tt, c in names if tt in NO_VALUE]
+        if weak:
+            parts.append(_no_value_note(weak, "drawn"))
     parts.append(f"Chemical shifts are referenced to {ref} at 0.00 ppm.")
     if t != "fit" and spec.get("baseline_correct", True):
         parts.append("The smooth baseline fitted by MANC-Q is subtracted.")
@@ -1052,6 +1082,10 @@ def caption(spec, R, traces, info):
                 if r.get("metabolite") and r["metabolite"] not in seen:
                     seen.add(r["metabolite"]); key.append(f"{(r.get('text') or abbrev(r['metabolite']))}, {plain_name(r['metabolite'])}")
             parts.append(f"Abbreviations: {'; '.join(key)}.")
+        samples = [s for tr in traces for s in tr["samples"]]
+        weak = [m for m in mets if R.has_no_value(m, samples)]
+        if weak:
+            parts.append(_no_value_note(weak, "labelled"))
         if spec["label_style"] != "off" and info.get("brackets_drawn"):
             parts.append("Brackets span multiplets.")
     for s in syms:
