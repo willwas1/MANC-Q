@@ -2,6 +2,13 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 2.0.4 (21 October 2026)
+
+Figures step: a **Figure name** box (under Size and export). Export saves the figure, its caption and its data
+under that name. Figures are no longer overwritten: if a figure of that name is already in the folder, Export
+offers the name with _2, _3 ... added and says so, and if you choose an existing name yourself it asks before
+replacing it. Nothing in the calculation has changed.
+
 ## 2.0.3 (21 October 2026)
 
 Figures step: **Show all** and **Hide all** buttons for the peak labels, under Labels and in the Edit labels

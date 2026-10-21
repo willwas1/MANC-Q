@@ -268,7 +268,9 @@ off, `#` 13C satellite; each is explained in the caption), or add your own label
 **4 Size and export.** Choose the printed width (single column 85 mm, 1.5 column 120 mm, double column 180 mm,
 or Custom: check your journal), the height, the text size and the line width. The preview is drawn at that
 printed size, and the line under it checks the smallest text and thinnest line (most journals want at least
-6 pt text and 0.25 pt lines). **Export...** saves PDF, SVG (editable in Illustrator or Inkscape), EPS, TIFF
+6 pt text and 0.25 pt lines). Type a **Figure name** (for example `Fig2_lactate_fit`) to save the figure under
+that name; an earlier figure is never overwritten without asking (if the name is taken, _2, _3 ... is added).
+**Export...** saves PDF, SVG (editable in Illustrator or Inkscape), EPS, TIFF
 (1200 dpi) and PNG (600 dpi), and can also save the caption, the data behind the figure (CSV), a processing
 record (which spectra, how they were processed, every setting) and a small Python script that draws the figure
 again.

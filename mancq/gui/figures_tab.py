@@ -209,14 +209,19 @@ class FiguresTab(QWidget):
         self.font = QDoubleSpinBox(); self.font.setRange(4, 14); self.font.setSingleStep(0.5); self.font.setSuffix(" pt")
         self.line = QDoubleSpinBox(); self.line.setRange(0.1, 3); self.line.setSingleStep(0.1); self.line.setSuffix(" pt")
         l4.addWidget(QLabel("Text, lines"), 2, 0); l4.addWidget(self.font, 2, 1); l4.addWidget(self.line, 2, 2)
+        self.fig_name = QLineEdit()
+        self.fig_name.setToolTip("The name the figure is saved under, e.g. Fig2_lactate_fit. Leave empty for a name "
+                                 "from the template. A figure is never overwritten without asking: if the name is "
+                                 "taken, _2, _3 ... is added.")
+        l4.addWidget(QLabel("Figure name"), 3, 0); l4.addWidget(self.fig_name, 3, 1, 1, 2)
         bx = A_primary("Export...")
         bx.clicked.connect(self.export)
-        l4.addWidget(bx, 3, 0, 1, 3)
+        l4.addWidget(bx, 4, 0, 1, 3)
         lay.addWidget(g4)
         lay.addStretch()
         for w in (self.template, self.style, self.which, self.width_pre, self.replicate):
             w.currentIndexChanged.connect(self.changed)
-        for w in (self.region, self.leave, self.inset, self.fit_region):
+        for w in (self.region, self.leave, self.inset, self.fit_region, self.fig_name):
             w.editingFinished.connect(self.changed)
         for w in (self.mag_from, self.mag_factor, self.clip_pct, self.stack_off, self.side_off, self.width,
                   self.height, self.font, self.line):
@@ -366,6 +371,7 @@ class FiguresTab(QWidget):
         self.width_pre.setCurrentIndex(i)
         self.width.setValue(s["width_mm"]); self.height.setValue(s["height_mm"])
         self.font.setValue(s["font_pt"]); self.line.setValue(s["line_pt"])
+        self.fig_name.setText(s.get("name", ""))
         self.loading = False
 
     def from_controls(self):
@@ -392,6 +398,7 @@ class FiguresTab(QWidget):
                                 if self.fit_mets.item(i).checkState() == Qt.Checked]
         s["width_mm"], s["height_mm"] = self.width.value(), self.height.value()
         s["font_pt"], s["line_pt"] = self.font.value(), self.line.value()
+        s["name"] = self.fig_name.text().strip()
 
     # ------------------------------------------------------------------ updates
     def preset_width(self):
@@ -839,10 +846,15 @@ class ExportDialog(QDialog):
         _A().fit_to_screen(self, 560, 420)
         v = QVBoxLayout(self)
         h = QHBoxLayout(); h.addWidget(QLabel("Save as"))
-        name = f"figure_{spec['template']}_{int(spec['width_mm'])}mm"
-        self.path = QLineEdit(os.path.join(out, "figures", name))
+        want = os.path.join(out, "figures", F.file_name(spec))
+        base = F.unused_base(want)                  # never offer a name that would overwrite an earlier figure
+        self.path = QLineEdit(base)
         bb = QPushButton("Browse..."); bb.clicked.connect(self.browse)
         h.addWidget(self.path, 1); h.addWidget(bb); v.addLayout(h)
+        if base != want:
+            taken = QLabel(f"There is already a figure called {os.path.basename(want)}, so this one is saved as "
+                           f"{os.path.basename(base)}. Type a new Figure name to choose another.")
+            taken.setWordWrap(True); theme.role(taken, "warn"); v.addWidget(taken)
         v.addWidget(QLabel(f"Printed size {spec['width_mm']:g} x {spec['height_mm']:g} mm; text {spec['font_pt']:g} pt."))
         g = QGroupBox("Formats"); gl = QVBoxLayout(g)
         self.fmt = []
@@ -872,6 +884,12 @@ class ExportDialog(QDialog):
         fmts = [k for k, cb in self.fmt if cb.isChecked()]
         extras = [k for k, cb in self.ext if cb.isChecked()]
         if not base or not (fmts or extras):
+            return
+        there = [f for f in F.files_for(base, fmts, extras) if os.path.exists(f)]
+        if there and QMessageBox.question(
+                self, "Replace figure?", f"{len(there)} file(s) called {os.path.basename(base)} are already in "
+                f"{os.path.dirname(base)}, for example {os.path.basename(there[0])}. Replace them?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
             return
         os.makedirs(os.path.dirname(base) or ".", exist_ok=True)
         QApplication.setOverrideCursor(Qt.WaitCursor)

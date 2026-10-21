@@ -450,7 +450,33 @@ def default_spec(R=None):
                 clip=False, clip_percent=30, label_style="numbers", label_tiers=["Quantified"], label_which="main",
                 labels=None, fit_metabolites=[], fit_region="", stack_offset=25, inset_region="0.8-1.1",
                 baseline_correct=True, overlay_offset=0, offset_x_ppm=0.0, colours={},
-                show_fit=False, fit_colour=FIT_COLOUR, width_mm=180.0, height_mm=90.0, font_pt=7.0, line_pt=0.6, title="")
+                show_fit=False, fit_colour=FIT_COLOUR, width_mm=180.0, height_mm=90.0, font_pt=7.0, line_pt=0.6, title="",
+                name="")
+
+
+def file_name(spec):
+    """The name the figure's files are saved under: the name typed in (made safe for Windows), else one from the
+    template and width."""
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(spec.get("name") or "")).strip(" ._")
+    return name or f"figure_{spec['template']}_{int(spec['width_mm'])}mm"
+
+
+EXTRA_SUFFIX = {"caption": "_caption.txt", "data": "_data.csv", "record": "_processing.txt",
+                "script": "_redraw.py"}
+
+
+def files_for(base, formats, extras):
+    """The files an export to `base` would write (to check for ones that already exist)."""
+    out = [f"{base}.{f}" for f in formats] + [base + EXTRA_SUFFIX[e] for e in extras if e in EXTRA_SUFFIX]
+    return out + ([base + "_figure.json"] if "script" in extras else [])
+
+
+def unused_base(base):
+    """base, or base_2, base_3 ... if files of that name are already there."""
+    k, b = 2, base
+    while any(os.path.exists(f) for f in files_for(b,("pdf", "svg", "eps", "tiff", "png"), list(EXTRA_SUFFIX))):
+        b, k = f"{base}_{k}", k + 1
+    return b
 
 
 def parse_ranges(text):
