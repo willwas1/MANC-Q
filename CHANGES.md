@@ -2,6 +2,12 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 2.0.3 (21 October 2026)
+
+Figures step: **Show all** and **Hide all** buttons for the peak labels, under Labels and in the Edit labels
+window. Hiding all labels keeps them (and your edits), so Show all brings them back. Nothing in the calculation
+has changed.
+
 ## 2.0.2 (21 October 2026)
 
 Figures step:

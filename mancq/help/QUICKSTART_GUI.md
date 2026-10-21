@@ -258,7 +258,8 @@ upper bound. The figure marks them `<=` or `n.d.` and the caption says they have
 **3 Labels.** Labels come from MANC-Q's own fit: the metabolites graded as you tick (Quantified by default),
 at their fitted peak positions: by default one label per metabolite, at its main peak. Tick **Upper bound** or
 **Not detected** to label those metabolites too; the caption then says they are labelled for reference only,
-with no value from MANC-Q. **Numbers** puts
+with no value from MANC-Q. **Show all** and **Hide all** show or hide every label at once (handy for hiding them
+all and then ticking back the few you want in **Edit labels...**). **Numbers** puts
 numbers on the plot and the key in the caption; **Abbreviations** writes Lac, Ala, Glc and so on. Crowded
 labels are moved up and joined to their peak by a thin line, and wide multiplets get a bracket. **Edit
 labels...** lets you hide a label, change its text, add a symbol (`*` contaminant or poloxamer, `~` peak cut

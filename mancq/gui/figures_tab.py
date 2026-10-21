@@ -188,6 +188,11 @@ class FiguresTab(QWidget):
                       "brackets over multiplets, or your own labels")
         self.n_labels = QLabel("")
         l3.addWidget(be, 5, 0, 1, 2); l3.addWidget(self.n_labels, 5, 2, 1, 2)
+        bsa = QPushButton("Show all"); bsa.clicked.connect(lambda: self.show_all_labels(True))
+        bsa.setToolTip("Show every peak label (your own labels and symbols are kept)")
+        bha = QPushButton("Hide all"); bha.clicked.connect(lambda: self.show_all_labels(False))
+        bha.setToolTip("Hide every peak label; Show all or Edit labels... brings them back")
+        l3.addWidget(bsa, 6, 0, 1, 2); l3.addWidget(bha, 6, 2, 1, 2)
         lay.addWidget(g3)
 
         g4 = QGroupBox("4  Size and export"); l4 = QGridLayout(g4)
@@ -580,6 +585,15 @@ class FiguresTab(QWidget):
             self.make_labels()
             self.changed()
 
+    def show_all_labels(self, on):
+        """Show or hide every label at once. Counts as an edit, so the choice is kept when other settings change."""
+        if self.R is None or not self.spec.get("labels"):
+            return
+        for r in self.spec["labels"]:
+            r["show"] = on
+        self.spec["labels_edited"] = True
+        self.changed()
+
     def export(self):
         if self.R is None:
             return
@@ -755,7 +769,9 @@ class LabelDialog(QDialog):
                                                                                          text="*", symbol="", bracket=False)))
         bd = QPushButton("Remove selected"); bd.clicked.connect(self.remove)
         br = QPushButton("Start again from the fit"); br.clicked.connect(self.do_reset)
-        h.addWidget(ba); h.addWidget(bd); h.addWidget(br); h.addStretch()
+        bsa = QPushButton("Show all"); bsa.clicked.connect(lambda: self.tick_all(True))
+        bha = QPushButton("Hide all"); bha.clicked.connect(lambda: self.tick_all(False))
+        h.addWidget(ba); h.addWidget(bd); h.addWidget(br); h.addWidget(bsa); h.addWidget(bha); h.addStretch()
         ok = QPushButton("OK"); ok.clicked.connect(self.accept)
         ca = QPushButton("Cancel"); ca.clicked.connect(self.reject)
         h.addWidget(ok); h.addWidget(ca)
@@ -779,6 +795,10 @@ class LabelDialog(QDialog):
         br = QTableWidgetItem(); br.setFlags(br.flags() | Qt.ItemIsUserCheckable)
         br.setCheckState(Qt.Checked if r.get("bracket") else Qt.Unchecked)
         self.table.setItem(i, 5, br)
+
+    def tick_all(self, on):
+        for i in range(self.table.rowCount()):
+            self.table.item(i, 0).setCheckState(Qt.Checked if on else Qt.Unchecked)
 
     def remove(self):
         for i in sorted({ix.row() for ix in self.table.selectedIndexes()}, reverse=True):
