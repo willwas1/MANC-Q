@@ -139,6 +139,19 @@ def grade(res, lib, sf, cf, *, S):
             hpred = amp_rep * m["unit_peak"]
             if hpred > S["CONTRADICT_MIN_SNR"] * sig and hobs < S["CONTRADICT_FRACTION"] * hpred:
                 contradicted.append(m["j"] + 1)
+        # a value from one reporter must be supported by the fit elsewhere in the molecule: if every other multiplet
+        # it predicts clearly above the noise gets almost nothing in its own local fit (the data there are explained
+        # by other compounds), the value rests on one peak that belongs to something else, usually a neighbour's
+        # multiplet that the fit moved away or made too narrow
+        unsupported = []
+        if S["NEEDS_FIT_SUPPORT"] and len(use) == 1 and amp_rep > 0:
+            for m in mps:
+                if m is use[0] or m["unit_peak"] <= 0 or _excluded_fraction(m, S=S) >= 0.5                         or (m["nprot"] < 0.3 and m["nprot"] / c["nprot"] < 0.1)                         or amp_rep * m["unit_peak"] <= S["CONTRADICT_MIN_SNR"] * sig:
+                    continue
+                if np.isfinite(m["local_amp"]) and m["local_amp"] >= S["FIT_SUPPORT_FRACTION"] * amp_rep:
+                    unsupported = []
+                    break
+                unsupported.append(m["j"] + 1)
         # the most constraining multiplet, but not a single outlier when several are available
         ub = (np.percentile(ubs, 20) if len(ubs) >= 4 else min(ubs)) * cf if ubs else np.nan
         why_not = ""
@@ -147,6 +160,10 @@ def grade(res, lib, sf, cf, *, S):
         elif contradicted:
             tier, conc = "Upper bound only", np.nan
             method = f"multiplet(s) {','.join(map(str, contradicted))} predicted but absent -> data upper bound"
+        elif unsupported:
+            tier, conc = "Upper bound only", np.nan
+            method = (f"multiplet(s) {','.join(map(str, unsupported))} predicted above the noise but given almost "
+                      f"nothing by the fit (the signal there belongs to other compounds) -> data upper bound")
         elif np.isfinite(ub) and conc > S["MAX_CONC_OVER_BOUND"] * ub:
             tier, conc = "Upper bound only", np.nan
             method = "fitted value exceeds what the data allow at another multiplet -> data upper bound"

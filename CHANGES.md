@@ -2,6 +2,35 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 2.0.5 (23 October 2026)
+
+Fewer false values for compounds that are not in a spectrum. On synthetic time-course spectra (low glucose, high
+lactate, as at the end of a culture) MANC-Q 2.0.4 gave values to absent compounds, for example L-Cystine
+Quantified 0.13 mM, L-Homoserine 0.11 mM, L-Arginine 0.07 mM and small values for creatinine, dimethylsulfone and
+acetylcholine. The causes and the fixes:
+
+* **A peak could slip by one coupling.** A doublet, or a doublet of doublets, of a compound that is there (tyrosine
+  at 3.06 ppm, phenylalanine at 3.12, methionine at 3.84, histidine at 3.24, the lactate and threonine doublets at
+  1.32) could settle 5 to 8 Hz from its true place, one coupling away, with half its lines still on the true ones.
+  The lines it left were then taken by compounds that are not there. Now, when a multiplet sits more than 3 Hz
+  from where the molecule's other multiplets put it, its region is also fitted from the in-line position and the
+  better fit is kept (setting SLIP_HZ). This also makes the values of compounds that are there better: on 8 test spectra
+  the largest error fell from 8.7 % to 3.4 % and 128 instead of 117 of 140 values are Quantified.
+* **A look-alike that takes a whole peak is now left out of the fit.** A compound that is fully in charge of one
+  peak (creatinine on the creatine CH3 singlet) is left out when the amount that peak implies would put another of
+  its peaks clearly where the data show nothing. Before, only compounds with no dominant peak were left out.
+* **A value that rests on one peak needs support from the rest of the molecule.** A value from a single reporter
+  peak is now Upper bound only when every other peak of the molecule that it predicts clearly above the noise
+  gets less than 10 % of it in the fit (settings NEEDS_FIT_SUPPORT, FIT_SUPPORT_FRACTION). The method column says
+  so. This works on existing results with `mancq regrade`.
+* **Demo:** a fifth spectrum, EXPNO 15, a late culture (glucose 0.8 mM, lactate 4.6 mM, formate 0.35 mM). MANC-Q
+  2.0.4 fails the demo check on it. The demo now takes about 7 minutes.
+
+Values for well-resolved compounds do not change. Fitting can take a little longer (up to about a quarter in my
+tests). One case is not solved: in one of the 16 test spectra creatine came out 0.21 instead of 0.30 mM (graded
+Overlapped, where 2.0.4 called it Quantified) because absent creatinine shares its CH3 peak and creatinine's other
+peak sits next to choline's, so neither the data nor the fit can show it is missing.
+
 ## 2.0.4 (21 October 2026)
 
 Figures step: a **Figure name** box (under Size and export). Export saves the figure, its caption and its data

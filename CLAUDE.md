@@ -32,7 +32,7 @@ em dashes in anything you write for him.
   fitting one spectrum; `grade.py` tiers; `report.py` tables, workbook, PDFs, QC flag; `engine.py` runs them
   for a folder (`run`) and re-exports every name, so `mancq.engine.X` still works. `spinsim.py` spin
   simulation; `fidproc.py` raw FID processing; `regrade.py`; `results.py`; `demo.py` synthetic demo and its checks
-  (EXPNO 10, 11, 13, 14); `shortcut.py` Windows desktop shortcut; `__main__.py` command line
+  (EXPNO 10, 11, 13, 14, 15); `shortcut.py` Windows desktop shortcut; `__main__.py` command line
   (`mancq` with no arguments opens the window).
 * `mancq/gui/app.py` PySide6 main window (8 steps: Spectra, Process spectra, Regions, Settings, Run, Results,
   Review, Figures), one file per step (`gui/spectra_step.py` ... `gui/review_step.py`), shared helpers in
@@ -53,8 +53,8 @@ em dashes in anything you write for him.
 ## Checking a change
 
 * `python -m mancq demo <folder>`: fits the synthetic spectra (10 processed, 11 raw FID, 13 look-alike neighbours,
-  14 shifts near the limit + phase error + unknown singlets) and checks itself; it must end with "Demo check
-  passed" (exit code 0). About 5 minutes. `--quick` fits only 10 and 13.
+  14 shifts near the limit + phase error + unknown singlets, 15 late culture: low glucose, high lactate) and checks
+  itself; it must end with "Demo check passed" (exit code 0). About 7 minutes. `--quick` fits only 10 and 13.
 * `python -m pytest tests` (also run by `.github/workflows/tests.yml` on every push).
 * `python -m mancq regrade <results folder>` should reproduce the same tiers and values.
 * For window changes, open it (`python -m mancq`) and look at every step, including with no raw FIDs.

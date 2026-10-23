@@ -347,6 +347,7 @@ def fit_spectrum(ppm_raw, y, sf, lib, log, *, S):
     B, Dpen = spline_basis(x, lo, hi, S["BASELINE_KNOT_PPM"])
     unknown = []
     dropped = {}                  # compounds left out of the fit (ghosts): {k: reason}
+    reseated = [0]                # multiplets moved back in line with their molecule in the last local refinement
 
     def mult_columns(full=False):
         M = np.zeros((len(x), nM))
@@ -365,11 +366,17 @@ def fit_spectrum(ppm_raw, y, sf, lib, log, *, S):
             mps = [MP[i] for i in ii]
             carry = [m for m in mps if np.isfinite(m["local_amp"]) and m["local_amp"] > 0
                      and m["loc_h"] >= S["LOQ_SNR"] * sigma]
-            if not carry or any(m["loc_dom"] >= S["GHOST_MAX_DOMINANCE"] for m in carry):
+            if not carry:
                 continue
+            # a compound with a dominant multiplet is left out only if that multiplet's own amount puts another of its
+            # multiplets clearly where the data show (almost) nothing: it has taken a look-alike's peak (creatinine
+            # on the creatine CH3 singlet, its CH2 singlet missing where choline's multiplet is)
+            dominant = any(m["loc_dom"] >= S["GHOST_MAX_DOMINANCE"] for m in carry)
             cols = {id(m): mcol(x, m["p"], m["it"], m["d"], fw0 * m["wf"], eta, half=HW) for m in mps}
             nprot = sum(m["nprot"] for m in mps)
             for m in sorted(carry, key=lambda m: -m["loc_h"]):
+                if dominant and m["loc_dom"] < S["GHOST_MAX_DOMINANCE"]:
+                    continue
                 centre = float((m["p"] * m["it"]).sum() / m["it"].sum() + m["d"])
                 where = (f"left out of the fit: its signal at {centre:.3f} ppm (multiplet {m['j'] + 1}, "
                          f"{m['loc_dom']:.0%} of the fitted signal there)")
@@ -378,6 +385,8 @@ def fit_spectrum(ppm_raw, y, sf, lib, log, *, S):
                     dropped[k] = f"{where} implies multiplet(s) {','.join(map(str, gone))}, which are not in the spectrum"
                     n += 1
                     break
+                if dominant:
+                    continue
                 # moved well away from its library position, and the multiplets it implies get nothing in the fit
                 # (they may sit under another compound's peaks, so the data alone cannot show they are missing)
                 shift_hz = abs(m["d"] - m["base"]) * sf
@@ -454,6 +463,23 @@ def fit_spectrum(ppm_raw, y, sf, lib, log, *, S):
         for m in MP:
             m.update(local_amp=np.nan, local_se=np.nan, loc_dom=0.0, loc_mis=np.inf, loc_h=0.0)
         act = [i for i in range(nM) if am[i] * M[:, i].max() > S["ROI_MIN_SNR"] * sigma]
+        # multiplets that sit well away from where the molecule's other multiplets put them (a doublet or doublet
+        # of doublets can slip by one coupling, keeping half its lines on the true ones): their region is also
+        # refined from the position in line with the rest of the molecule, and the better fit is kept
+        slip = {}
+        if S["SLIP_HZ"] and (max_nfev is None or max_nfev > 0):
+            strong = {i for i in act if am[i] * M[:, i].max() > S["LOQ_SNR"] * sigma}
+            for k, ii in MPk.items():
+                if k in dropped or lib[k]["source"] == "polymer":
+                    continue
+                on = [i for i in ii if i in strong and not MP[i]["win"]]
+                for i in on:
+                    rest = [MP[j]["d"] - MP[j]["base"] for j in on if j != i]
+                    if not rest:
+                        continue
+                    d_mol = MP[i]["base"] + float(np.median(rest))
+                    if abs(MP[i]["d"] - d_mol) * sf > S["SLIP_HZ"]:
+                        slip[i] = float(np.clip(d_mol, MP[i]["dlo"], MP[i]["dhi"]))
         items = [("m", i, MP[i]["p"].min() + MP[i]["d"], MP[i]["p"].max() + MP[i]["d"]) for i in act]
         items += [("u", i, u["pos"], u["pos"]) for i, u in enumerate(unknown) if ua[i] > 0]
         pad = S["ROI_PAD_HZ"] / sf
@@ -468,6 +494,7 @@ def fit_spectrum(ppm_raw, y, sf, lib, log, *, S):
         if cur:
             rois.append(cur)
         signal = fit - base_fit
+        reseated[0] = 0
         for roi in rois:
             rlo = min(t[2] for t in roi) - pad
             rhi = max(t[3] for t in roi) + pad
@@ -504,40 +531,58 @@ def fit_spectrum(ppm_raw, y, sf, lib, log, *, S):
                 c_, _ = nnls(A_, target * ww, maxiter=50 * A_.shape[1])
                 return c_, A_ @ c_ - target * ww, np.array(dd_).T, np.array(dw_).T, C, A_
 
-            c_, r_, Dd, Dw, C, A_ = lin(v)
-            ssr = (r_ ** 2).sum()
-            lam = 1e-3
             ntot = nm + nu
             idx_d = list(range(nm)) + list(range(2 * nm, 2 * nm + nu))
             idx_w = list(range(nm, 2 * nm)) + list(range(2 * nm + nu, 2 * nm + 2 * nu))
-            for _ in range(S["ROI_MAX_NFEV"] if max_nfev is None else max_nfev):
-                amps = c_[:ntot]
-                J = np.hstack([Dd * amps[None, :], Dw * amps[None, :]]) * ww[:, None]
-                JTJ = J.T @ J
-                g_ = J.T @ r_
-                diag = np.diag(JTJ).copy()
-                diag[diag <= 0] = 1.0
-                improved, rel = False, 0.0
-                for _t in range(6):
-                    try:
-                        step = np.linalg.solve(JTJ + lam * np.diag(diag), g_)
-                    except np.linalg.LinAlgError:
-                        lam *= 10
-                        continue
-                    vn = v.copy()
-                    vn[idx_d] -= step[:ntot]
-                    vn[idx_w] -= step[ntot:]
-                    vn = np.clip(vn, lbv, ubv)
-                    out = lin(vn)
-                    sn = (out[1] ** 2).sum()
-                    if sn < ssr:
-                        rel = (ssr - sn) / ssr
-                        v, (c_, r_, Dd, Dw, C, A_), ssr = vn, out, sn
-                        lam = max(lam / 3, 1e-7)
-                        improved = True
+
+            def descend(v):
+                out = lin(v)
+                c_, r_, Dd, Dw, C, A_ = out
+                ssr = (r_ ** 2).sum()
+                lam = 1e-3
+                for _ in range(S["ROI_MAX_NFEV"] if max_nfev is None else max_nfev):
+                    amps = c_[:ntot]
+                    J = np.hstack([Dd * amps[None, :], Dw * amps[None, :]]) * ww[:, None]
+                    JTJ = J.T @ J
+                    g_ = J.T @ r_
+                    diag = np.diag(JTJ).copy()
+                    diag[diag <= 0] = 1.0
+                    improved, rel = False, 0.0
+                    for _t in range(6):
+                        try:
+                            step = np.linalg.solve(JTJ + lam * np.diag(diag), g_)
+                        except np.linalg.LinAlgError:
+                            lam *= 10
+                            continue
+                        vn = v.copy()
+                        vn[idx_d] -= step[:ntot]
+                        vn[idx_w] -= step[ntot:]
+                        vn = np.clip(vn, lbv, ubv)
+                        o_ = lin(vn)
+                        sn = (o_[1] ** 2).sum()
+                        if sn < ssr:
+                            rel = (ssr - sn) / ssr
+                            v, out, ssr = vn, o_, sn
+                            c_, r_, Dd, Dw, C, A_ = out
+                            lam = max(lam / 3, 1e-7)
+                            improved = True
+                            break
+                        lam *= 8
+                    if not improved or rel < 1e-5:
                         break
-                    lam *= 8
-                if not improved or rel < 1e-5:
+                return v, out, ssr
+
+            v, (c_, r_, Dd, Dw, C, A_), ssr = descend(v)
+            here = [a_ for a_, i in enumerate(ms) if i in slip]
+            # all slipped multiplets of this region together (neighbours can swap places), then each on its own
+            for try_ in ([here] + ([[a_] for a_ in here] if len(here) > 1 else [])) if here else []:
+                v2 = v.copy()
+                for a_ in try_:
+                    v2[a_] = slip[ms[a_]]
+                v2, out2, ssr2 = descend(np.clip(v2, lbv, ubv))
+                if ssr2 < ssr:
+                    v, (c_, r_, Dd, Dw, C, A_), ssr = v2, out2, ssr2
+                    reseated[0] += len(try_)
                     break
             for a_, i in enumerate(ms):
                 MP[i]["d"], MP[i]["wf"] = float(v[a_]), float(v[nm + a_])
@@ -683,7 +728,9 @@ def fit_spectrum(ppm_raw, y, sf, lib, log, *, S):
         nroi = roi_refine(coef, M, U, fit)
         M = mult_columns()
         coef, fit, A = global_solve(M, U)
-        log(f"   iter {it+1}: {moved} compounds re-positioned (chi2/n={c1:.2f}); {nroi} ROIs refined -> chi2/n={chi(fit):.2f}  ({time.time()-t0:.0f}s)")
+        log(f"   iter {it+1}: {moved} compounds re-positioned (chi2/n={c1:.2f}); {nroi} ROIs refined"
+            + (f", {reseated[0]} multiplet(s) moved back in line with their molecule" if reseated[0] else "")
+            + f" -> chi2/n={chi(fit):.2f}  ({time.time()-t0:.0f}s)")
         # missing multiplets in the data: from the first iteration; nothing in the fit: once shifts have settled
         if S["DROP_GHOSTS"] and find_ghosts(coef, settled=it >= 1):
             M = mult_columns()

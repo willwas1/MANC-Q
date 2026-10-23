@@ -65,6 +65,9 @@ SETTINGS = dict(
     ROI_MIN_SNR=5,                # multiplets taller than this take part in local refinement
     ROI_PAD_HZ=6.0,
     ROI_MAX_NFEV=60,
+    SLIP_HZ=3.0,                  # a multiplet more than this from where its molecule's other multiplets put it is also
+                                  # refined from that position, and the better fit kept: a doublet can otherwise slip by
+                                  # one coupling onto a neighbour, leaving its true lines to absent compounds (0 = off)
     UNKNOWN_MIN_SNR=15,           # residual peaks above this become free "unassigned" singlets
     UNKNOWN_MIN_FRACTION=0.30,    # ... and only where the residual is >=30% of the local signal
     UNKNOWN_BLOCK_SNR=10,         # ... and not within UNKNOWN_EXCLUSION_HZ of a fitted library line
@@ -79,9 +82,10 @@ SETTINGS = dict(
     UNKNOWN_WIDTH_RANGE=(0.7, 4.0),  # ... the range it may take ...
     UNKNOWN_MOVE_HZ=1.0,          # ... and how far the singlet may move from the residual peak it was found at
     MAX_UNKNOWNS=300,
-    DROP_GHOSTS=True,             # leave out of the fit a compound that only sits on other compounds' peaks: none of its
-                                  # multiplets is dominant, and the amount its signal implies would put another of its
-                                  # multiplets above CONTRADICT_MIN_SNR x noise where the data show (almost) nothing
+    DROP_GHOSTS=True,             # leave out of the fit a compound that only sits on other compounds' peaks: the amount
+                                  # its signal implies would put another of its multiplets above CONTRADICT_MIN_SNR x
+                                  # noise where the data show (almost) nothing (for a compound with a dominant multiplet,
+                                  # the amount that multiplet implies)
     GHOST_MAX_DOMINANCE=0.6,      # ... "dominant" = at least this share of the fitted signal under the multiplet
     GHOST_SHIFT_HZ=5.0,           # ... or its signal is this far from the library position (GHOST_SHIFT_TITRATABLE_HZ
     GHOST_SHIFT_TITRATABLE_HZ=15.0,  # for pH-sensitive compounds) and the other multiplets it implies get almost
@@ -120,6 +124,9 @@ SETTINGS = dict(
     MAX_CONC_OVER_BOUND=1.5,      # reported value may not exceed 1.5x the data upper bound
     SINGLE_REPORTER_MIN_SHARE=0.3,  # a single clean reporter must carry >=30% of the molecule's protons
     CONTRADICT_MIN_SNR=10, CONTRADICT_FRACTION=0.3,   # predicted multiplet >10 sigma but <30% observed -> reject
+    NEEDS_FIT_SUPPORT=True,       # a value from a single reporter multiplet is kept only if at least one other multiplet
+    FIT_SUPPORT_FRACTION=0.10,    # of the molecule that it predicts above CONTRADICT_MIN_SNR x noise gets at least this
+                                  # share of it in its own local fit (when there is such a multiplet); else Upper bound only
     O_MIN_DOMINANCE=0.25, O_MAX_MISFIT=0.50,
     DECONV_MAX_REL_SE=0.35, DECONV_MIN_MULTIPLETS=2,
     DECONV_MAX_MISFIT=0.5,        # a multiplet counts towards DECONV_MIN_MULTIPLETS only if its own signal is at least

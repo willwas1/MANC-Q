@@ -16,9 +16,10 @@ Put any path that contains spaces in double quotes, for example `"C:\NMR data\Ex
 ## Commands
 
 Check that everything works: this makes synthetic 600 MHz spectra of known composition, quantifies them, and
-prints the recovered values next to the true ones (about 5 minutes). EXPNO 10 is a processed spectrum, EXPNO 11
+prints the recovered values next to the true ones (about 7 minutes). EXPNO 10 is a processed spectrum, EXPNO 11
 a raw FID of the same mixture, EXPNO 13 has creatinine and O-acetylcarnitine instead of their look-alikes
-creatine and choline, and EXPNO 14 has shifts near the limit, a small phase error and three unknown singlets.
+creatine and choline, EXPNO 14 has shifts near the limit, a small phase error and three unknown singlets, and
+EXPNO 15 is a late culture (little glucose, much lactate).
 
 ```
 mancq demo

@@ -19,11 +19,17 @@ REF_MM = 0.5
 TRUTH_SWAPPED = dict({k: v for k, v in TRUTH_MM.items() if k not in ("Creatine", "Choline")},
                      **{"Creatinine": 0.3, "O-Acetylcarnitine": 0.2})
 UNKNOWN_SINGLETS = [(2.80, 0.3), (5.95, 0.2), (8.55, 0.15)]       # (ppm, mM of one proton): not in the library
+# a late culture (as a time course ends): little glucose, much lactate and formate. Neighbouring doublets and
+# doublets of doublets here (lactate and threonine, tyrosine and phenylalanine) once slipped by one coupling and left
+# their true lines to compounds that are not there (fixed in 2.0.5)
+TRUTH_LATE = dict(TRUTH_MM, **{"D-Glucose": 0.8, "L-Lactate": 4.6, "L-Glutamine": 0.5, "L-Alanine": 1.05,
+                               "Formate": 0.35})
 CASES = {"10": (TRUTH_MM, "processed spectrum"),
          "11": (TRUTH_MM, "raw FID, processed by MANC-Q"),
          "13": (TRUTH_SWAPPED, "creatinine without creatine, O-acetylcarnitine without choline"),
          "14": (TRUTH_MM, "shifts 5.5-6.5 Hz from the library (all but the offset anchors), 1.5 degree phase error, "
-                "3 unknown singlets")}
+                "3 unknown singlets"),
+         "15": (TRUTH_LATE, "late culture: little glucose (0.8 mM), much lactate (4.6 mM)")}
 QUICK = ("10", "13")
 LIMITS = {"Quantified": 0.10, "Overlapped (semi-quantitative)": 0.25}     # largest allowed |recovered/true - 1|
 NO_VALUE = ("Not detected", "Upper bound only", "Not measurable (region ignored)")
@@ -246,7 +252,7 @@ def demo(out="mancq_demo", sf=600.13, quick=False):
 
 def write_demo(spec_dir, sf=600.13, cache_dir=".mancq_cache", extra=False):
     """Write the demo experiments: 10 (processed), 11 (raw FID only) and 12 (a TOCSY of the same sample as 10);
-    with extra, also the harder cases 13 and 14 (see CASES)."""
+    with extra, also the harder cases 13, 14 and 15 (see CASES)."""
     ppm0, sw_hz, y = make_spectrum(sf, cache_dir=cache_dir)
     write_bruker(os.path.join(spec_dir, "10"), ppm0, sw_hz, sf, y, "MANC-Q synthetic demo (processed)")
     fid, fsw, o1 = make_fid(sf, cache_dir=cache_dir)
@@ -259,3 +265,5 @@ def write_demo(spec_dir, sf=600.13, cache_dir=".mancq_cache", extra=False):
         ppm0, sw_hz, y = make_spectrum(sf, seed=5, cache_dir=cache_dir, near_limit=True, phase_deg=1.5,
                                        singlets=UNKNOWN_SINGLETS)
         write_bruker(os.path.join(spec_dir, "14"), ppm0, sw_hz, sf, y, "MANC-Q synthetic test: harder spectrum")
+        ppm0, sw_hz, y = make_spectrum(sf, seed=108, cache_dir=cache_dir, truth=TRUTH_LATE)
+        write_bruker(os.path.join(spec_dir, "15"), ppm0, sw_hz, sf, y, "MANC-Q synthetic test: late culture")
