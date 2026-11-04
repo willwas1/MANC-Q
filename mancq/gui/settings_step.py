@@ -77,13 +77,18 @@ class SettingsTab(QWidget):
         self.out.textChanged.connect(self.check_out)
         ncpu = os.cpu_count() or 1
         g3l.addWidget(QLabel("CPU cores to use"), 2, 0)
-        self.workers = QSpinBox(); self.workers.setRange(1, max(1, ncpu))
-        self.workers.setValue(max(1, ncpu - 1)); g3l.addWidget(self.workers, 2, 1)
-        cn = QLabel(f"This PC has {ncpu}. Each core fits one spectrum at a time, so more cores only help with "
-                    "several spectra. Use fewer to keep the PC responsive for other work.")
+        # 0 = Automatic: one per core but one, as many as the free memory allows when the run starts
+        self.workers = QSpinBox(); self.workers.setRange(0, max(1, ncpu))
+        self.workers.setSpecialValueText("Automatic"); self.workers.setValue(0); g3l.addWidget(self.workers, 2, 1)
+        free = q.available_memory()
+        cn = QLabel(f"This PC has {ncpu}" + (f" and {free / 2 ** 30:.0f} GB of free memory" if free else "") +
+                    f". Each core fits one spectrum at a time and needs up to {q.WORKER_MEMORY_GB:g} GB of memory. "
+                    "Automatic uses all cores but one, but only as many as the free memory allows when the run "
+                    "starts. Use fewer to keep the PC responsive for other work.")
         cn.setWordWrap(True); theme.role(cn, "muted")
         g3l.addWidget(cn, 3, 1, 1, 2)
-        self.workers.setToolTip("Number of spectra fitted at the same time (one per CPU core)")
+        self.workers.setToolTip("Number of spectra fitted at the same time (one per CPU core); Automatic also "
+                                "allows for the free memory")
         self.overlays = QCheckBox("Write an overlay PDF for every spectrum (recommended)"); self.overlays.setChecked(True)
         g3l.addWidget(self.overlays, 4, 0, 1, 3)
         self.notify = QCheckBox("Tell me when a run finishes (Windows notification and a sound)")
@@ -211,7 +216,11 @@ class SettingsTab(QWidget):
     def from_json(self, d):
         self.ref.setCurrentText(d.get("reference", "TSP-d4")); self.ref_mm.setValue(d.get("ref_mm", 0.0))
         {"none": self.r_none, "same": self.r_same, "each": self.r_each}[d.get("dilution_mode", "same")].setChecked(True)
-        self.dil.setValue(d.get("dilution", 1.0)); self.workers.setValue(d.get("workers", self.workers.value()))
+        self.dil.setValue(d.get("dilution", 1.0))
+        w = d.get("workers", 0)
+        if w == max(1, (os.cpu_count() or 1) - 1):        # the old default (before 2.0.6) becomes Automatic
+            w = 0
+        self.workers.setValue(w)
         self.overlays.setChecked(d.get("overlays", True))
         self.notify.setChecked(d.get("notify", True))
 

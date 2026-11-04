@@ -54,7 +54,7 @@ Optional settings:
 | `--lb 0.3` | line broadening (Hz) used when processing FIDs |
 | `--processing proc.csv` | process these spectra in MANC-Q (see below); `processing_used.csv` from an earlier run repeats its processing exactly |
 | `--no-overlays` | skip the overlay PDFs |
-| `--workers 4` | number of spectra fitted in parallel |
+| `--workers 4` | number of spectra fitted in parallel (default: CPU cores minus 1, fewer if the free memory is short, about 1.5 GB each) |
 | `--overwrite` | the results folder already has MANC-Q results: delete them and run again (see below) |
 | `--resume` | carry on a run that was stopped or crashed in this results folder (see below) |
 

@@ -96,6 +96,7 @@ class RunTab(QWidget):
             for j, val in enumerate([s["expno"], s["title"], "Waiting", ""]):
                 self.table.setItem(i, j, QTableWidgetItem(val))
         self.n_total, self.n_done, self.durations = len(job["spectra"]), 0, []
+        self.n_workers = 1
         self.bar.setRange(0, self.n_total); self.bar.setValue(0)
         self.log.clear(); self.log_pos = 0; self.t_start = time.time()
         self.overall.setText("Starting...")
@@ -119,6 +120,7 @@ class RunTab(QWidget):
             what = "FID" if info.get("source", "fid") == "fid" else "spectrum"
             self.set_status(smp, f"Processing {what} ({info['k']} of {info['n']})", ACCENT)
         elif ev == "run_started":
+            self.n_workers = info["workers"]
             self.overall.setText(f"Fitting {info['n']} spectra, {info['workers']} at a time...")
         elif ev == "sample_started":
             self.set_status(smp, "Fitting...", ACCENT)
@@ -129,6 +131,9 @@ class RunTab(QWidget):
             res = f"{info['n_quantified']} quantified; library explains {info['explained']:.0%} of the signal"
             self.set_status(smp, "Done (earlier result reused)" if info.get("reused") else
                             f"Done in {info['seconds'] / 60:.1f} min", "#15803d", res)
+        elif ev == "sample_retry":
+            self.set_status(smp, "Ran out of memory; will try again with fewer at a time", "#b45309",
+                            info.get("error", ""))
         elif ev == "sample_failed":
             self.n_done += 1
             self.set_status(smp, "Failed", "#b91c1c", info.get("error", ""))
@@ -157,7 +162,7 @@ class RunTab(QWidget):
             el = time.time() - self.t_start
             msg = f"{self.n_done} of {self.n_total} spectra done, {el / 60:.0f} min elapsed"
             if self.durations:
-                w = self.win.settings_tab.workers.value()
+                w = self.n_workers
                 left = (self.n_total - self.n_done) * np.mean(self.durations) / max(1, min(w, self.n_total))
                 msg += f", about {max(1, round(left / 60))} min remaining"
             self.overall.setText(msg)

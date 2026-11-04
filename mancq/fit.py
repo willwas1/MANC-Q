@@ -412,11 +412,14 @@ def fit_spectrum(ppm_raw, y, sf, lib, log, *, S):
             return np.zeros((len(x), 0))
         return np.array([mcol(x, np.array([u["pos"]]), np.array([1.0]), 0.0, fw0 * u["wf"], eta, half=HW) for u in unknown]).T
 
-    def global_solve(M, U):
+    def global_solve(M, U, keep=False):
+        # keep: also return the design matrix A, the largest array of a fit (about 130 MB for a 600 MHz spectrum);
+        # only the last solve needs it, so the others do not hold it while the next one is built
         A = np.hstack([M, U, B])
         nnon = nM + U.shape[1]
         Aw = A * wts[:, None]
-        cn = np.sqrt((Aw ** 2).sum(0))
+        sq = (Aw ** 2).sum(0)
+        cn = np.sqrt(sq)
         rows = []
         # baseline curvature penalty
         P = np.zeros((Dpen.shape[0], A.shape[1]))
@@ -435,7 +438,7 @@ def fit_spectrum(ppm_raw, y, sf, lib, log, *, S):
                 r_[i1], r_[i2] = s_, -s_
                 rows.append(r_[None, :])
         Pr = np.vstack(rows)
-        cs = np.sqrt((Aw ** 2).sum(0) + (Pr ** 2).sum(0))
+        cs = np.sqrt(sq + (Pr ** 2).sum(0))
         cs[cs == 0] = 1
         # normal equations -> Cholesky -> small bounded least squares (same solution, much faster)
         Aw /= cs
@@ -454,7 +457,7 @@ def fit_spectrum(ppm_raw, y, sf, lib, log, *, S):
         r = lsq_linear(R, z, bounds=(lb, np.inf), method="bvls", max_iter=5000)
         TIMING["solve"] = TIMING.get("solve", 0) + time.time() - _t
         coef = r.x / cs
-        return coef, A @ coef, A
+        return coef, A @ coef, (A if keep else None)
 
     def roi_refine(coef, M, U, fit, max_nfev=None):
         am = coef[:nM]
@@ -706,7 +709,7 @@ def fit_spectrum(ppm_raw, y, sf, lib, log, *, S):
     # ---------- iterate ----------
     M = mult_columns()
     U = unk_columns()
-    coef, fit, A = global_solve(M, U)
+    coef, fit, _ = global_solve(M, U)
     log(f"   start: chi2/n={chi(fit):.2f}  ({time.time()-t0:.0f}s)")
     for it in range(S["N_ITER"]):
         if it == 1 and S["ETA_SEARCH"]:
@@ -719,22 +722,22 @@ def fit_spectrum(ppm_raw, y, sf, lib, log, *, S):
                     best = (chi(f2), et)
             eta = best[1] if best[1] is not None else eta_keep
             M = mult_columns()
-            coef, fit, A = global_solve(M, U)
+            coef, fit, _ = global_solve(M, U)
             log(f"   lineshape eta -> {eta:.2f}  chi2/n={chi(fit):.2f}")
         moved = compound_stage(coef, fit, M)
         M = mult_columns()
-        coef, fit, A = global_solve(M, U)
+        coef, fit, _ = global_solve(M, U)
         c1 = chi(fit)
         nroi = roi_refine(coef, M, U, fit)
         M = mult_columns()
-        coef, fit, A = global_solve(M, U)
+        coef, fit, _ = global_solve(M, U)
         log(f"   iter {it+1}: {moved} compounds re-positioned (chi2/n={c1:.2f}); {nroi} ROIs refined"
             + (f", {reseated[0]} multiplet(s) moved back in line with their molecule" if reseated[0] else "")
             + f" -> chi2/n={chi(fit):.2f}  ({time.time()-t0:.0f}s)")
         # missing multiplets in the data: from the first iteration; nothing in the fit: once shifts have settled
         if S["DROP_GHOSTS"] and find_ghosts(coef, settled=it >= 1):
             M = mult_columns()
-            coef, fit, A = global_solve(M, U)
+            coef, fit, _ = global_solve(M, U)
 
     # ---------- unassigned singlets: only where no fitted library line is nearby ----------
     am = coef[:nM]
@@ -758,12 +761,12 @@ def fit_spectrum(ppm_raw, y, sf, lib, log, *, S):
             continue
         unknown.append(dict(pos=float(x[p]), wf=S["UNKNOWN_WIDTH_START"]))
     U = unk_columns()
-    coef, fit, A = global_solve(M, U)
+    coef, fit, _ = global_solve(M, U)
     log(f"   +{len(unknown)} unassigned singlets -> chi2/n={chi(fit):.2f}")
     roi_refine(coef, M, U, fit)
     M = mult_columns()
     U = unk_columns()
-    coef, fit, A = global_solve(M, U)
+    coef, fit, A = global_solve(M, U, keep=True)
     # local amplitudes consistent with the final positions (no further movement)
     roi_refine(coef, M, U, fit, max_nfev=0)
     log(f"   final chi2/n={chi(fit):.2f}  ({time.time()-t0:.0f}s)")

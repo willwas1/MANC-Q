@@ -10,7 +10,7 @@ SETTINGS = dict(
     PROCNO=1,
     TARGET_POINT_HZ=0.25,         # spectra with finer digital resolution are block-averaged to this
     SAMPLES=None,                 # None = every EXPNO folder found, or a list such as ["10", "11"]
-    N_WORKERS=None,               # parallel processes (None = number of CPU cores - 1)
+    N_WORKERS=None,               # parallel processes (None = CPU cores - 1, fewer if free memory is short)
     RESUME=True,                  # carrying on a stopped run: re-use the spectra it finished (same run, same settings)
     GALLERY_MAX_SAMPLES=8,        # the per-metabolite gallery is only drawn for small runs
     LIBRARY_DIR=None,             # None = the library folder shipped with the package
@@ -184,6 +184,46 @@ warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
 DEFAULT_SETTINGS = SETTINGS       # the defaults above; never changed while MANC-Q runs
 TIMING = {}
 RESULTS_FORMAT = 2                # version of the results folder layout (1 = MANC-Q 1.9.2 and earlier)
+WORKER_MEMORY_GB = 1.5            # memory one fit can need at its peak (measured: 0.8 GB for the 600 MHz demo spectra)
+MEMORY_HEADROOM_GB = 1.5          # memory left free for Windows, the window and other programs
+
+
+def available_memory():
+    """Bytes of memory free for new programs right now, or None if this system does not say."""
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            class _MemoryStatus(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            ms = _MemoryStatus()
+            ms.dwLength = ctypes.sizeof(ms)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms)):
+                return int(ms.ullAvailPhys)
+            return None
+        if os.path.exists("/proc/meminfo"):              # Linux: MemAvailable counts reclaimable caches too
+            with open("/proc/meminfo") as fh:
+                for line in fh:
+                    if line.startswith("MemAvailable:"):
+                        return int(line.split()[1]) * 1024
+        return int(os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
+    except (OSError, ValueError, AttributeError):
+        _log.debug("free memory not known", exc_info=True)
+        return None
+
+
+def default_workers(n_samples=None):
+    """How many spectra to fit at the same time when N_WORKERS is not set: one per CPU core but one, and no more
+    than the free memory allows (WORKER_MEMORY_GB each, keeping MEMORY_HEADROOM_GB free)."""
+    n = max(1, (os.cpu_count() or 2) - 1)
+    free = available_memory()
+    if free is not None:
+        n = min(n, max(1, int((free / 2 ** 30 - MEMORY_HEADROOM_GB) // WORKER_MEMORY_GB)))
+    return n if n_samples is None else max(1, min(n, n_samples))
 
 
 class Settings(dict):

@@ -2,6 +2,25 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 2.0.6 (3 November 2026)
+
+No more spectra lost because the PC ran out of memory. MANC-Q used to fit one spectrum per CPU core but one at the
+same time. On a 12-core PC with 16 GB of memory that is 11 fits at once; each needs up to about 1.1 GB, and with
+MANC-Q itself and Windows that is more memory than the PC has. In a run of many spectra, 4 of the 11 failed in
+their first minute with "MemoryError" and were simply missing from the results.
+
+* **The number of spectra fitted at once now also depends on the free memory.** MANC-Q still uses one CPU core
+  per spectrum (all but one core), but no more than the free memory allows at the start of the run, allowing
+  1.5 GB per fit and leaving 1.5 GB free for Windows and other programs. On the 16 GB PC above that is about 5
+  at once instead of 11. The run log says how many it uses, and the CPU cores and free memory it saw.
+* **In the window**, "CPU cores to use" now starts at **Automatic**, which does this. You can still pick a number;
+  a number you pick is used as it is. A saved settings file with the old default (cores minus 1) opens as
+  Automatic.
+* **A spectrum that still runs out of memory is fitted again** once the others have finished, with half as many
+  at a time. The Run step shows "Ran out of memory; will try again" for it meanwhile.
+* **Each fit needs a little less memory**: it no longer keeps a second copy of its largest table (about 130 MB)
+  while it works. The fitted values are exactly the same.
+
 ## 2.0.5 (23 October 2026)
 
 Fewer false values for compounds that are not in a spectrum. On synthetic time-course spectra (low glucose, high

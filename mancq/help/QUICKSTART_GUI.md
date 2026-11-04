@@ -68,8 +68,9 @@ original sample to the tube (or "No dilution" for tube concentrations), and chec
 For different dilutions per sample, type them in the table, or click **Load from a file...** (a CSV or Excel
 file with the EXPNO in the first column and the dilution in the second) or copy the two columns in Excel and
 click **Paste from Excel**. MANC-Q tells you which spectra got no dilution and which rows matched no spectrum.
-**CPU cores to use** sets how many spectra are fitted at the same time (one per core; the default is all but
-one). Fewer cores leave the PC free for other work; more cores only help when there are several spectra. With
+**CPU cores to use** sets how many spectra are fitted at the same time (one per core). The default,
+**Automatic**, uses all cores but one, but no more than the free memory allows (each fit needs up to about
+1.5 GB). Fewer cores leave the PC free for other work; more cores only help when there are several spectra. With
 **Tell me when a run finishes** ticked, Windows shows a notification and plays a sound at the end of a run.
 Click **Start**.
 

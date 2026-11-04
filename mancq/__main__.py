@@ -30,7 +30,7 @@ def main(argv=None):
                    help="optional CSV with columns sample,dilution to set the factor per EXPNO")
     r.add_argument("--procno", type=int, default=1, help="processing number to read (default 1)")
     r.add_argument("--samples", nargs="*", default=None, help="only these EXPNO folders")
-    r.add_argument("--workers", type=int, default=None, help="parallel processes (default: CPU cores - 1)")
+    r.add_argument("--workers", type=int, default=None, help="parallel processes (default: CPU cores - 1, fewer if free memory is short)")
     r.add_argument("--pluronic", default="auto", choices=["auto", "yes", "ignore", "no"],
                    help="Pluronic F-68 / poloxamer (cell-culture media): auto = model it if present (default), "
                         "yes = always model it, ignore = leave its regions out of the fit, no = not in the samples")

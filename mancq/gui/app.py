@@ -238,7 +238,7 @@ class MainWindow(QMainWindow):
         spectra = [dict(s) for s in sel]
         processing = self.process_tab.engine_processing()
         settings = dict(REFERENCE=st.ref.currentText().split("-")[0], PROCNO=self.spectra_tab.procno.value(),
-                        SAMPLES=[s["expno"] for s in sel], N_WORKERS=st.workers.value(),
+                        SAMPLES=[s["expno"] for s in sel], N_WORKERS=st.workers.value() or None,
                         OVERLAYS=st.overlays.isChecked(), RESUME=True, PROCESSING=processing)
         settings["existing"] = existing
         settings.update(self.regions_tab.engine_settings())

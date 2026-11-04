@@ -26,7 +26,8 @@ import numpy as np
 import pandas as pd
 # everything is importable from mancq.engine, as before the split into modules
 from .settings import (SETTINGS, HERE, _read_version, __version__, DEFAULT_SETTINGS, TIMING, RESULTS_FORMAT,
-                       Settings, DECONV, NOTMEAS, MANUAL, _json_default)
+                       Settings, DECONV, NOTMEAS, MANUAL, _json_default, available_memory, default_workers,
+                       WORKER_MEMORY_GB, MEMORY_HEADROOM_GB)
 from .io import (read_spectrum, _usable, list_samples, _num, _flag, read_processing, read_acquisition,
                  read_dilutions, EXISTING_MESSAGE, _RESULT_FILES, _RESULT_DIRS, ResultsExist, has_results,
                  previous_run, new_run_folder, clear_results, sample_source, _raw_folder, manual_file, read_manual)
@@ -64,7 +65,8 @@ def process_sample(job):
         return gr, pk, ob, q, res, note + lines
     except Exception as exc:
         import traceback
-        return None, None, None, dict(sample=smp, error=f"{type(exc).__name__}: {exc}"), None, \
+        return None, None, None, dict(sample=smp, error=f"{type(exc).__name__}: {exc}",
+                                      out_of_memory=isinstance(exc, MemoryError)), None, \
             note + [f"Sample {smp} FAILED: {type(exc).__name__}: {exc}", traceback.format_exc()]
 
 
@@ -191,7 +193,8 @@ def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, progress=No
     "overwrite" deletes them first (see clear_results); "resume" carries on the stopped run in out_dir, re-using
     the spectra it finished if nothing that affects them has changed.
     progress(event, sample, info): optional callback; events are "run_started", "sample_started",
-    "sample_done", "sample_failed", "cancelled", "aggregating", "finished".
+    "sample_done", "sample_failed", "sample_retry" (ran out of memory; fitted again later), "cancelled",
+    "aggregating", "finished".
     cancel(): optional function returning True to stop; spectra already running are finished first."""
     if ref_mm is None or ref_mm <= 0:
         raise ValueError("the reference (TSP/DSS) concentration in the tube, in mM, is required")
@@ -308,19 +311,24 @@ def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, progress=No
         lib = prepare_library(build_library(sf, libdir, os.path.join(out, "_cache"), S=S), sf, S["PLURONIC"] in ("auto", "yes"), S=S)
         log(f"  {sum(c['source']=='GISSMO' for c in lib)} GISSMO spin systems, {sum(c['source']=='SPIN' for c in lib)} other spin systems, "
             f"{sum(c['source']=='CASMDB' for c in lib)} peak lists, {sum(c['source']=='polymer' for c in lib)} polymer terms")
-        nw = S["N_WORKERS"] or max(1, min(len(samples), (os.cpu_count() or 2) - 1))
+        # N_WORKERS not set: one per CPU core but one, and only as many as the free memory allows
+        nw = S["N_WORKERS"] or default_workers(len(samples))
         nw = max(1, min(nw, len(samples)))
         jobs = {smp: (smp, dil.get(smp, S["DEFAULT_DILUTION"]), libdir, out, dict(S)) for smp in samples}
-        log(f"Fitting {len(samples)} spectra with {nw} worker(s); a few minutes per spectrum ...")
+        free = available_memory()
+        log(f"Fitting {len(samples)} spectra with {nw} worker(s); a few minutes per spectrum ..."
+            + (f" (CPU cores: {os.cpu_count()}; free memory: {free / 2 ** 30:.1f} GB)" if free else ""))
         say("run_started", None, dict(n=len(samples), workers=nw, sf=sf))
         results, cancelled = {}, []
 
-        def finished(smp, output, t0):
+        def finished(smp, output, t0, retry=False):
             gr, pk, ob, q, res, lines = output
             for ln in lines:
                 log(ln)
             results[smp] = output
-            if gr is None:
+            if gr is None and retry and q.get("out_of_memory"):
+                say("sample_retry", smp, dict(error=q.get("error", "out of memory"), seconds=time.time() - t0))
+            elif gr is None:
                 say("sample_failed", smp, dict(error=q.get("error", "unknown error"), seconds=time.time() - t0))
             else:
                 say("sample_done", smp, dict(seconds=time.time() - t0, n_quantified=int((gr.tier == "Quantified").sum()),
@@ -336,27 +344,46 @@ def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, progress=No
             os.environ[var] = "1"
         from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
         import multiprocessing
-        # "spawn" everywhere: the Windows behaviour, and safe when called from a GUI
-        with ProcessPoolExecutor(max_workers=nw, mp_context=multiprocessing.get_context("spawn")) as ex:
-            running = {}
-            while queue or running:
-                while queue and len(running) < nw and not stop():
-                    smp = queue.pop(0)
-                    say("sample_started", smp, {})
-                    running[ex.submit(process_sample, jobs[smp])] = (smp, time.time())
-                if stop() and queue:
-                    cancelled, queue = queue, []
-                if not running:
-                    break
-                done, _ = wait(list(running), timeout=1.0, return_when=FIRST_COMPLETED)
-                for fut in done:
-                    smp, t0 = running.pop(fut)
-                    try:
-                        output = fut.result()
-                    except Exception as exc:          # worker crashed
-                        output = (None, None, None, dict(sample=smp, error=f"{type(exc).__name__}: {exc}"), None,
-                                  [f"Sample {smp} FAILED: {exc}"])
-                    finished(smp, output, t0)
+
+        def fit_all(queue, nw, retry):
+            """Fit the spectra in queue, nw at a time; returns those not started because the run was stopped."""
+            # "spawn" everywhere: the Windows behaviour, and safe when called from a GUI
+            with ProcessPoolExecutor(max_workers=nw, mp_context=multiprocessing.get_context("spawn")) as ex:
+                running = {}
+                while queue or running:
+                    while queue and len(running) < nw and not stop():
+                        smp = queue.pop(0)
+                        say("sample_started", smp, {})
+                        running[ex.submit(process_sample, jobs[smp])] = (smp, time.time())
+                    if stop() and queue:
+                        return queue
+                    if not running:
+                        break
+                    done, _ = wait(list(running), timeout=1.0, return_when=FIRST_COMPLETED)
+                    for fut in done:
+                        smp, t0 = running.pop(fut)
+                        try:
+                            output = fut.result()
+                        except Exception as exc:          # worker crashed
+                            output = (None, None, None, dict(sample=smp, error=f"{type(exc).__name__}: {exc}",
+                                                             out_of_memory=isinstance(exc, MemoryError)), None,
+                                      [f"Sample {smp} FAILED: {exc}"])
+                        finished(smp, output, t0, retry)
+            return []
+
+        cancelled = fit_all(queue, nw, retry=True)
+        # spectra that ran out of memory: once more, after the others, with fewer at a time
+        short = [s_ for s_ in samples if s_ in results and results[s_][0] is None
+                 and results[s_][3].get("out_of_memory")]
+        if short and not cancelled and not stop():
+            nw2 = max(1, min(nw // 2, default_workers(len(short))))
+            log(f"\n{len(short)} spectra ran out of memory: {short}; fitting them again, {nw2} at a time ...")
+            for s_ in short:
+                del results[s_]
+            cancelled = fit_all(list(short), nw2, retry=False)
+        else:
+            for s_ in short:
+                say("sample_failed", s_, dict(error=results[s_][3].get("error", "out of memory"), seconds=0.0))
         if cancelled:
             log(f"\nCancelled: {len(cancelled)} spectra not fitted: {cancelled}")
             say("cancelled", None, dict(not_fitted=cancelled))
@@ -366,7 +393,7 @@ def run(data_dir, out_dir, ref_mm, dilution=1.0, dilution_file=None, progress=No
                 continue
             gr, pk, ob, q, res, lines = results[smp]
             if gr is None:
-                failed.append(smp); qc.append(q); continue
+                failed.append(smp); qc.append({k: v for k, v in q.items() if k != "out_of_memory"}); continue
             grades.append(gr); peaks.append(pk); obs.append(ob); qc.append(q)
         if failed:
             log(f"\n*** {len(failed)} spectra failed and are not in the tables: {failed}")
