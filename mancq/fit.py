@@ -50,8 +50,11 @@ def fit_tsp(ppm, y, sf, *, S):
     m = (ppm > -0.2) & (ppm < 0.2)
     if not m.any():
         raise ValueError("the spectrum does not cover 0 ppm, where the TSP/DSS reference must be")
+    if not np.isfinite(y).all():
+        raise ValueError("the spectrum contains values that are not numbers (NaN or infinity), so it cannot be "
+                         "fitted: process it again in TopSpin, or check the file was copied completely")
     x0 = ppm[m][np.argmax(y[m])]
-    if y[m].max() < 20 * noise_sigma(ppm, y):
+    if not y[m].max() > 20 * noise_sigma(ppm, y):       # also true for a spectrum that is all zeros near 0 ppm
         raise ValueError(f"no {S['REFERENCE']} peak near 0 ppm. MANC-Q needs the TSP/DSS internal standard, "
                          f"referenced to 0.000 ppm: check that it was added and that the spectrum is referenced "
                          f"in TopSpin")

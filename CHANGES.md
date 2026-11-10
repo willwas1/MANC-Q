@@ -2,6 +2,25 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 2.0.8 (10 November 2026)
+
+Two failures found by the stress test on synthetic spectra, where 8 spectra stopped with "Each lower bound must
+be strictly less than each upper bound".
+
+* **Baseline correction could run away.** The optional baseline correction of raw FID processing draws a smooth
+  curve through the points that look like baseline. When its knots were closer together than a stretch of signal
+  (or the gap left around the water), nothing held the curve down there and it could swing to absurd values
+  (around 10^98 with knots 0.1 ppm apart). MANC-Q itself only uses knots 0.5 ppm apart, where this does not
+  happen, so no results from MANC-Q are affected; the stress-test generator used the same function with closer
+  knots. The curve is now checked, and if it has run away it is fitted again using only the knots that have
+  baseline points between them. At the usual spacings the result is exactly as before (checked from 2 to 0.125 ppm
+  on four synthetic spectra).
+* **A plain message for a spectrum that cannot be fitted.** A spectrum with nothing at 0 ppm (all zeros there),
+  or with values that are not numbers, now stops with a message that says so and what to check, instead of the
+  message above.
+* No fitted value, tier or setting changes.
+* New check: `tests/test_unusable_spectrum.py`.
+
 ## 2.0.7 (10 November 2026)
 
 A spectrum with no peak tall enough to list is no longer lost from the results. Found by the stress test on

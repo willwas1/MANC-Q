@@ -95,6 +95,19 @@ def autophase(F, keep, fit_ph1=False):
     return p0 % 360, p1
 
 
+def _supported_knots(knots, xs, min_points=8):
+    """The knots that have at least min_points baseline points (xs, ascending) since the knot kept before them,
+    and as many after the last one."""
+    kept, last = [], xs[0]
+    for k in knots:
+        if np.count_nonzero((xs > last) & (xs <= k)) >= min_points:
+            kept.append(k)
+            last = k
+    while kept and np.count_nonzero(xs > kept[-1]) < min_points:
+        kept.pop()
+    return np.array(kept, float)
+
+
 def baseline_correct(ppm, y, keep, knot_ppm=0.5):
     """Smooth spline through points that look like baseline (iteratively excluding signal)."""
     from scipy.interpolate import make_lsq_spline
@@ -104,16 +117,26 @@ def baseline_correct(ppm, y, keep, knot_ppm=0.5):
     noise = 1.4826 * np.median(np.abs(np.diff(yy))) / np.sqrt(2)
     base_mask = kk.copy()
     knots = np.arange(x[0] + knot_ppm, x[-1] - knot_ppm, knot_ppm)
-    t = np.r_[[x[0]] * 4, knots, [x[-1]] * 4]
+    ends = ([x[0]] * 4, [x[-1]] * 4)
+    t = np.r_[ends[0], knots, ends[1]]
     b = np.zeros_like(yy)
+    limit = 10.0 * np.abs(yy).max()                 # a baseline far outside the data is a runaway spline, not a baseline
     for _ in range(6):
         xs, ys = x[base_mask], yy[base_mask]
         try:
-            spl = make_lsq_spline(xs, ys, t, k=3)
+            new_b = make_lsq_spline(xs, ys, t, k=3)(x)
+            if not (np.isfinite(new_b).all() and np.abs(new_b).max() <= limit):
+                # knots with no baseline points between them (a stretch of signal, or the water gap, wider than
+                # the knot spacing) leave the spline free there: fit again with only the knots the points support
+                t = np.r_[ends[0], _supported_knots(knots, xs), ends[1]]
+                new_b = make_lsq_spline(xs, ys, t, k=3)(x)
+                if not (np.isfinite(new_b).all() and np.abs(new_b).max() <= limit):
+                    _log.debug("baseline spline unstable; keeping the previous baseline")
+                    break
         except Exception:
             _log.debug("baseline spline could not be refined further", exc_info=True)
             break
-        b = spl(x)
+        b = new_b
         r = yy - b
         new = kk & (np.abs(r) < 4 * noise)
         if new.sum() < 50 or (new == base_mask).all():
