@@ -10,6 +10,18 @@ from .io import read_manual
 from .fit import _contradicted_by, _excluded_fraction, _n_lines, mcol
 
 
+def total_se(tier, conc, se_noise, misfit, *, S):
+    """The reported standard error of a value: the SE from the noise with a model-error term added in quadrature,
+    (a + b x misfit) x value, where misfit is the compound's best_misfit and (a, b) depend on the tier (settings
+    SE_MODEL_...). Tiers without a measured value, and values with no SE, are returned unchanged."""
+    a, b = {"Quantified": S["SE_MODEL_QUANTIFIED"], "Overlapped (semi-quantitative)": S["SE_MODEL_OVERLAPPED"],
+            DECONV: S["SE_MODEL_DECONV"]}.get(tier, (0.0, 0.0))
+    if not (np.isfinite(se_noise) and np.isfinite(conc)) or (a == 0 and b == 0):
+        return se_noise
+    floor = min(a + b * (misfit if np.isfinite(misfit) else 0.0), 1.0)
+    return float(np.hypot(se_noise, floor * conc))
+
+
 def grade(res, lib, sf, cf, *, S):
     """cf converts a per-proton area to mM in the medium. Per-multiplet quality
     measures come from the local (ROI) fits, where each multiplet has its own
@@ -26,7 +38,7 @@ def grade(res, lib, sf, cf, *, S):
         if mps and all(m["unit_peak"] <= 0 or _excluded_fraction(m, S=S) >= 0.9 for m in mps):
             # every multiplet of this compound lies in an excluded region: nothing to fit
             rows.append(dict(metabolite=c["name"], cls=c["cls"], tier=NOTMEAS, conc_mM=np.nan, se_mM=np.nan,
-                             whole_compound_fit_mM=np.nan, method="all multiplets inside ignored regions", reporter_ppm="",
+                             se_noise_mM=np.nan, whole_compound_fit_mM=np.nan, method="all multiplets inside ignored regions", reporter_ppm="",
                              LOD_mM=np.nan, upper_bound_mM=np.nan, snr=0.0, best_dominance=np.nan,
                              best_misfit=np.nan, n_reporters=0, reporter_ratio=np.nan,
                              source=c["source"], provenance=c["provenance"]))
@@ -194,13 +206,15 @@ def grade(res, lib, sf, cf, *, S):
                 method = "no usable reporter -> data upper bound"
         if tier == "Upper bound only":
             se = np.nan                       # a bound is not a measurement (the bound is in upper_bound_mM)
+        se_noise = se
+        se = total_se(tier, conc, se_noise, best_mis, S=S)
         left_out = next((m["dropped"] for m in mps if m.get("dropped")), "")
         if left_out:
             method = f"{left_out}; {method}"
         # centre (ppm, as fitted) of the multiplet(s) the value comes from, for the tiers that use reporters
         rep_ppm = ";".join(f"{float((m['p'] * m['it']).sum() / m['it'].sum() + m['d']):.4f}" for m in use) \
             if tier in ("Quantified", "Overlapped (semi-quantitative)") else ""
-        rows.append(dict(metabolite=c["name"], cls=c["cls"], tier=tier, conc_mM=conc, se_mM=se,
+        rows.append(dict(metabolite=c["name"], cls=c["cls"], tier=tier, conc_mM=conc, se_mM=se, se_noise_mM=se_noise,
                          whole_compound_fit_mM=a * cf if a > 0 else 0.0, method=method, reporter_ppm=rep_ppm,
                          LOD_mM=lod, upper_bound_mM=ub, snr=round(snr, 1), best_dominance=round(best_dom, 3),
                          best_misfit=round(best_mis, 3) if np.isfinite(best_mis) else np.nan,
@@ -329,6 +343,8 @@ def apply_manual(out, gr):
             continue
         gr.at[i, "auto_tier"], gr.at[i, "auto_conc_mM"] = gr.at[i, "tier"], gr.at[i, "conc_mM"]
         gr.at[i, "tier"], gr.at[i, "conc_mM"], gr.at[i, "se_mM"] = MANUAL, float(e["conc_mM"]), np.nan
+        if "se_noise_mM" in gr:
+            gr.at[i, "se_noise_mM"] = np.nan
         if "reporter_ppm" in gr:
             gr.at[i, "reporter_ppm"] = ""        # a manual value is the whole compound, not one peak
         how = e.get("reason") or "set by hand"

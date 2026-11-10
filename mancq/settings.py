@@ -132,6 +132,11 @@ SETTINGS = dict(
     DECONV_MAX_MISFIT=0.5,        # a multiplet counts towards DECONV_MIN_MULTIPLETS only if its own signal is at least
                                   # twice the local misfit (not a sliver under a neighbour's imperfect fit)
     DECONV_MIN_DOMINANCE=0.10,    # ... and this compound is at least 10% of the fitted signal under that multiplet
+    # model error in the reported SE: se_mM^2 = (SE from the noise)^2 + ((a + b x best_misfit) x value)^2, with (a, b)
+    # per tier. The noise alone covered the truth for 59 % of Quantified values in the stress test on synthetic
+    # spectra; these values give about 95 % for 1.96 x se_mM. (0, 0) switches the term off. The SE from the noise
+    # alone stays in se_noise_mM.
+    SE_MODEL_QUANTIFIED=(0.005, 0.75), SE_MODEL_OVERLAPPED=(0.02, 1.25), SE_MODEL_DECONV=(0.20, 1.0),
     MAX_REPORTER_DISAGREE=0.20,   # Quantified only if the molecule's other multiplets (above LOQ, any dominance) give a
                                   # median value within 20% of the reporter value; otherwise Overlapped
     SINGLET_NEEDS_SECOND=True,    # a lone singlet reporter is Quantified only if another multiplet of the molecule agrees

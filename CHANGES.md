@@ -2,6 +2,37 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 2.0.9 (10 November 2026)
+
+The reported standard error now includes model error, not only the noise. This changes the SE of every value. No
+concentration and no tier changes.
+
+* **The problem.** The stress test on synthetic spectra of known composition (1,908 spectra) showed that the true
+  amount was within 1.96 SE of the reported value for only 59 % of Quantified values and 41 % of Overlapped values,
+  where 95 % is expected. The SE came from the noise in the fit alone (typically 0.6 % of the value). It left out
+  the larger part of the error: small mismatches in line shape, position and overlap.
+* **The change.** `se_mM` is now the noise SE with a model-error term added:
+  `se_mM^2 = se_noise_mM^2 + ((a + b x best_misfit) x value)^2`. `best_misfit` is the compound's own misfit, which
+  MANC-Q already reports: how far the fit is from the data under its best multiplet. A well fitted compound keeps a
+  tight error bar and a badly fitted one gets a wide one. a and b are 0.005 and 0.75 for Quantified, 0.02 and 1.25
+  for Overlapped, 0.20 and 1.0 for a deconvolution estimate (settings `SE_MODEL_QUANTIFIED`, `SE_MODEL_OVERLAPPED`,
+  `SE_MODEL_DECONV`; `(0, 0)` switches the term off).
+* **What it gives.** The constants were chosen on half the stress spectra and checked on the other half: the truth
+  is within 1.96 SE for 95.2 % of Quantified and 94.4 % of Overlapped values. The typical Quantified error bar goes
+  from 0.6 % to 2.7 % of the value. Errors have long tails, so 1 SE holds the truth about 86 times in 100, more
+  than the usual 68: read `value +/- 1.96 x se_mM` as the 95 % interval.
+* **The noise SE is kept.** New column `se_noise_mM` in `concentrations_long.csv` and the Long_table sheet holds
+  the old number. The rule that accepts a deconvolution estimate still uses the noise SE, which is why no tier
+  changes.
+* **Older results.** `python -m mancq regrade <results folder>` applies the new SE without fitting again (checked
+  on the demo: same tiers, same values, `se_noise_mM` equal to the old `se_mM`). Results folders from before 2.0.9
+  that are not regraded keep the noise-only SE, which is too small.
+* **Still to confirm.** These constants were set on the same stress run that found the problem, so that run is
+  not the proof that they work. The hardest spectra (every problem at once) reach 89 %. The confirmatory stress
+  run with a new seed will decide whether they stay as they are.
+* The SE still excludes relaxation (T1), errors in the library itself and TSP weighing errors.
+* New check: `tests/test_error_bars.py`.
+
 ## 2.0.8 (10 November 2026)
 
 Two failures found by the stress test on synthetic spectra, where 8 spectra stopped with "Each lower bound must
