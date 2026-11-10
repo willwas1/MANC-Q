@@ -36,7 +36,7 @@ from .fit import (pv, noise_sigma, fit_tsp, PH_COLUMNS, ph_from_shift, shift_fro
                   histidine_targets, mcol, mcol_d, spline_basis, Grid, fit_spectrum, _observed_height,
                   _contradicted_by, _n_lines, _excluded_fraction, detect_pluronic)
 from .grade import (grade, _main_partner, _reporter_doubt, observed_peaks, shown_value, TIER_COLOURS, TIER_ORDER,
-                    apply_manual)
+                    apply_manual, OBS_COLUMNS, read_observed)
 from .report import (_plt, plt, PALETTE, TAG, gapped, overlay_pdf, gallery_from_csv, profiles_pdf, _metabolite_fwhm,
                      qc_flags, NOT_DETECTED_NOTE, UPPER_BOUND_NOTE, ph_readme, aggregate_outputs)
 
@@ -56,7 +56,8 @@ def process_sample(job):
     if S["RESUME"] and all(os.path.exists(f) for f in done):
         why = _reuse_problem(per, smp, d, S=S)
         if why is None:
-            gr, pk, ob, qdf = (pd.read_csv(f) for f in done)
+            gr, pk, qdf = (pd.read_csv(f) for f in (done[0], done[1], done[3]))
+            ob = read_observed(done[2])
             return gr, pk, ob, qdf.iloc[0].to_dict(), None, [f"Sample {smp}: re-used earlier result (same run, "
                                                              f"same settings)"]
         note = [f"Sample {smp}: its earlier result cannot be used ({why}); fitting it again"]

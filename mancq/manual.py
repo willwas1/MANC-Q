@@ -357,7 +357,7 @@ def update_results(out, samples=None, log=print):
             log(f"  {s}: overlay and simulated spectrum redrawn ({len(q.read_manual(out, s))} adjusted)")
     grades = [pd.read_csv(os.path.join(per, f"{s}_grades.csv"), dtype={"sample": str}) for s in done]
     peaks = [pd.read_csv(os.path.join(per, f"{s}_peaks.csv"), dtype={"sample": str}) for s in done]
-    obs = [pd.read_csv(os.path.join(per, f"{s}_obs.csv"), dtype={"sample": str}) for s in done]
+    obs = [q.read_observed(os.path.join(per, f"{s}_obs.csv"), dtype={"sample": str}) for s in done]
     qc = [pd.read_csv(os.path.join(per, f"{s}_qc.csv"), dtype={"sample": str}).iloc[0].to_dict() for s in done]
     sf = float(qc[0]["SF_MHz"])
     lib = q.prepare_library(q.build_library(sf, S["LIBRARY_DIR"] or os.path.join(q.HERE, "library"),

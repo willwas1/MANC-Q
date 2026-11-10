@@ -63,7 +63,7 @@ def regrade(out, library_dir=None, **grading):
             gr.to_csv(os.path.join(per, f"{smp}_grades.csv"), index=False)
             pk.to_csv(os.path.join(per, f"{smp}_peaks.csv"), index=False)
             grades.append(gr); peaks.append(pk)
-            obs.append(pd.read_csv(os.path.join(per, f"{smp}_obs.csv")))
+            obs.append(q.read_observed(os.path.join(per, f"{smp}_obs.csv")))
             qc.append(pd.read_csv(os.path.join(per, f"{smp}_qc.csv"), dtype={"sample": str}).iloc[0].to_dict())
             log(f"  {smp}: {(gr.tier == 'Quantified').sum()} quantified")
         q.aggregate_outputs(out, grades, peaks, obs, qc, lib, samples, log, S=S)

@@ -251,6 +251,20 @@ def _reporter_doubt(clean, mps, amp_use, self_contra, c, sig, cf, *, S):
     return ""
 
 
+# columns of the observed-peaks table, written even when a spectrum has no peak tall enough to list
+OBS_COLUMNS = ["sample", "ppm", "height", "snr", "fitted_height", "assignment", "top_contributor", "top_fraction",
+               "library_assigned"]
+
+
+def read_observed(path, **kw):
+    """One spectrum's saved observed-peaks table (<sample>_obs.csv). A spectrum with no peak tall enough to list
+    has an empty table; up to 2.0.6 that was saved as an empty file, which is read here as no peaks."""
+    try:
+        return pd.read_csv(path, **kw)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame(columns=OBS_COLUMNS)
+
+
 def observed_peaks(res, lib, sample, sf):
     x = res["grid"].x
     ys = res["yv"] - res["base_fit"]
@@ -269,7 +283,7 @@ def observed_peaks(res, lib, sample, sf):
                          assignment="; ".join(assign) if assign else "unassigned",
                          top_contributor=top, top_fraction=round(float(v[order[0]] / tot), 3) if tot > 0 else 0.0,
                          library_assigned=bool(tot > 0 and not top.startswith("unassigned"))))
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=OBS_COLUMNS)
 
 
 def shown_value(tier, conc, upper_bound):

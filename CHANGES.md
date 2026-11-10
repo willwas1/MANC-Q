@@ -2,6 +2,22 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 2.0.7 (10 November 2026)
+
+A spectrum with no peak tall enough to list is no longer lost from the results. Found by the stress test on
+synthetic spectra: two very dilute spectra (20-fold and 50-fold dilutions) were fitted normally, then reported as
+failed with "No columns to parse from file" and left out of every table.
+
+* **The cause.** For each spectrum MANC-Q saves a table of the peaks it sees (at least 10 times the noise). When
+  there were none, that table was saved as an empty file with no column headings, and an empty file cannot be read
+  back. The first run was not affected, but carrying on a stopped run, `regrade`, and applying manual adjustments
+  all read the saved table, and failed on it.
+* **The fix.** The table is now saved with its column headings even when it has no rows, and an empty file from
+  an older results folder is read as "no peaks". Older results folders therefore work without fitting again.
+* No fitted value, tier or setting changes. The results folder layout is the same.
+* New check: `tests/test_no_peaks.py` fits the demo spectrum and a synthetic spectrum with the reference line and
+  noise only, then carries on the run and regrades it; both spectra must stay in the tables.
+
 ## 2.0.6 (3 November 2026)
 
 No more spectra lost because the PC ran out of memory. MANC-Q used to fit one spectrum per CPU core but one at the

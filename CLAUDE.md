@@ -42,7 +42,8 @@ em dashes in anything you write for him.
 * `mancq/shifttable.py` chemical shift assignment table (chemical_shift_assignments.xlsx), written with
   every results update.
 * `tests/`: checks on synthetic data only, run with `python -m pytest tests` (each file also runs on its own:
-  pH estimate, figures, shift table, overwrite warning, subset rerun, results tables, QC, results format).
+  pH estimate, figures, shift table, overwrite warning, subset rerun, results tables, QC, results format,
+  no peaks).
 * `mancq/library/`: `compounds.csv` (149 compounds: 123 GISSMO, 25 CASMDB peak lists, 1 literature spin
   system), `gissmo_spin_systems.txt`, `other_spin_systems.txt`, `peaklists.csv`, `peaklists_manifest.csv`.
 * `MANC-Q.bat` double-click launcher (downloads uv + private Python into `.runtime`); `constraints.txt` exact
