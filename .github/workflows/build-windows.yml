@@ -32,9 +32,21 @@ jobs:
       - name: Self-test (fits the synthetic demo spectra with the built app)
         shell: pwsh
         run: |
+          "Processor: $((Get-CimInstance Win32_Processor).Name)"
           $p = Start-Process -FilePath "dist\MANC-Q\MANC-Q.exe" -ArgumentList "--selftest" -Wait -PassThru
           Get-Content "$env:TEMP\MANC-Q selftest\selftest.txt"
-          if ($p.ExitCode -ne 0) { throw "self-test failed (exit code $($p.ExitCode))" }
+          if ($p.ExitCode -ne 0) {
+            Compress-Archive -Path "$env:TEMP\MANC-Q selftest" -DestinationPath selftest-results.zip
+            throw "self-test failed (exit code $($p.ExitCode))"
+          }
+
+      - name: Keep the self-test results when it failed (to see which value was off, and why)
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: selftest-results
+          path: selftest-results.zip
+          if-no-files-found: ignore
 
       - name: Make the installer and the portable zip
         shell: pwsh
