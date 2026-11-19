@@ -90,6 +90,8 @@ SETTINGS = dict(
     GHOST_SHIFT_HZ=5.0,           # ... or its signal is this far from the library position (GHOST_SHIFT_TITRATABLE_HZ
     GHOST_SHIFT_TITRATABLE_HZ=15.0,  # for pH-sensitive compounds) and the other multiplets it implies get almost
                                   # nothing in the fit. Looked for from the second iteration on, once shifts have settled
+    GHOST_LEAST_AMOUNT=True,      # judge the amount from the multiplet that implies the least (False: from any one of them,
+                                  # as up to 2.0.11, which could drop glucose on a peak shared with a neighbour)
 
     # sample pH estimate from the histidine imidazole singlets (H2 near 7.8 ppm, H4 near 7.05 ppm). It is the pH in
     # the NMR tube at acquisition, an ESTIMATE: trends are reliable, absolute pH about +/-0.2 with these constants

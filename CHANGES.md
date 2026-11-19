@@ -2,6 +2,33 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 2.0.12 (19 November 2026)
+
+A compound is no longer left out of the fit because a neighbour inflated one of its multiplets. This changes the fit
+itself, so values can move slightly in any spectrum; in real culture spectra it brings back glucose where it was lost.
+
+* **The problem.** Since 1.9.0 a compound that "only sits on other compounds' peaks" is left out of the fit (a
+  ghost). The test was: if any one of its well fitted multiplets, taken alone, implies more of the compound than its
+  other multiplets show, the compound is left out. Refitting 65 real 800 MHz culture spectra showed that this dropped
+  glucose at 20 to 50 mM in 25 of them. Glucose's multiplet at 3.54 ppm shares its peak with other compounds (or,
+  in other spectra, its multiplet at 3.72 ppm sits on the wings of the Pluronic line) and implied about four times
+  more glucose than the other multiplets, so the alpha-H1 doublet at 5.24 ppm looked far too small, although it was
+  clearly there and belonged to glucose alone.
+* **The change.** The amount is now judged from the multiplet that implies the least (of the dominant multiplets, if
+  the compound has any; setting `GHOST_LEAST_AMOUNT`, `False` gives the old rule). A real look-alike, such as
+  creatinine on the creatine CH3 singlet, has one dominant multiplet and is still left out as before.
+* **What it gives.** In the 65 culture spectra glucose has a value in 60 instead of 40, and valine, leucine and
+  malate also come back where they had been lost. On 150 stress-test spectra refitted with 2.0.12 (60 with
+  look-alike compounds, 50 random mixtures, 20 clean, 20 single-factor sweeps), against the same spectra with 2.0.11:
+  present compounds given a value 85.2 to 86.1 %, Quantified within 10 % of the truth 96.9 to 97.2 %, Overlapped
+  within 25 % 94.9 to 94.6 %, absent compounds given a value 1.00 to 1.07 % (look-alike set 0.77 to 0.73 %, random
+  set 1.76 to 2.10 %), absent compounds graded Quantified 0.31 % both. The demo check passes unchanged.
+* **Still open.** The second part of the ghost rule (a compound more than 5 Hz, or 15 Hz if pH-sensitive, from its
+  library position whose other multiplets get almost nothing) still leaves arginine and lysine out of most of those
+  culture spectra; these limits were set on synthetic 600 MHz spectra and need checking on real ones.
+* **Older results.** This changes the fit, so results folders need fitting again; regrade is not enough.
+* New check: `tests/test_ghost_least_amount.py`.
+
 ## 2.0.11 (19 November 2026)
 
 A value that rests on one singlet now needs stronger evidence. Some compounds that were graded with a value become

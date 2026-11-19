@@ -377,13 +377,17 @@ def fit_spectrum(ppm_raw, y, sf, lib, log, *, S):
             dominant = any(m["loc_dom"] >= S["GHOST_MAX_DOMINANCE"] for m in carry)
             cols = {id(m): mcol(x, m["p"], m["it"], m["d"], fw0 * m["wf"], eta, half=HW) for m in mps}
             nprot = sum(m["nprot"] for m in mps)
+            # the amount is judged from the multiplet that implies the least: a multiplet a neighbour has inflated (a
+            # shared peak, the wings of the Pluronic line) must not drop a compound that its other multiplets support
+            least = _ghost_test_multiplet(carry, dominant, S=S)
             for m in sorted(carry, key=lambda m: -m["loc_h"]):
                 if dominant and m["loc_dom"] < S["GHOST_MAX_DOMINANCE"]:
                     continue
                 centre = float((m["p"] * m["it"]).sum() / m["it"].sum() + m["d"])
                 where = (f"left out of the fit: its signal at {centre:.3f} ppm (multiplet {m['j'] + 1}, "
                          f"{m['loc_dom']:.0%} of the fitted signal there)")
-                gone = _contradicted_by(m, mps, m["local_amp"], x, yv, base_now, fw0, sf, sigma, grid.dx, cols, S=S)
+                gone = _contradicted_by(m, mps, m["local_amp"], x, yv, base_now, fw0, sf, sigma, grid.dx, cols, S=S) \
+                    if least is None or m is least else []
                 if gone:
                     dropped[k] = f"{where} implies multiplet(s) {','.join(map(str, gone))}, which are not in the spectrum"
                     n += 1
@@ -827,6 +831,16 @@ def _observed_height(x, yv, base, apex, half, dx):
     if seg.size < 2 or np.any(np.diff(seg) > 2 * dx) or j1 <= j0:
         return None
     return max(float((yv[j0:j1] - base[j0:j1]).max()), 0.0)
+
+
+def _ghost_test_multiplet(carry, dominant, *, S):
+    """The multiplet whose amount decides whether a compound is a ghost: of the multiplets that carry signal (only the
+    dominant ones, if it has any), the one that implies the least of the compound (setting GHOST_LEAST_AMOUNT; None
+    when it is off, and then any one of them can decide, as up to 2.0.11)."""
+    if not S["GHOST_LEAST_AMOUNT"]:
+        return None
+    pool = [m for m in carry if not dominant or m["loc_dom"] >= S["GHOST_MAX_DOMINANCE"]]
+    return min(pool, key=lambda m: m["local_amp"]) if pool else None
 
 
 def _contradicted_by(i, mps, amp, x, yv, base, fw0, sf, sig, dx, cols=None, *, S):

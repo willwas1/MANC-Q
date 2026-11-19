@@ -1,7 +1,7 @@
 ; Inno Setup script: turns dist\MANC-Q into a normal Windows installer (MANC-Q-setup.exe).
 ; Install Inno Setup (free, jrsoftware.org), open this file, click Compile. Run build_windows.bat first. (GitHub Actions does both automatically.)
 #ifndef MyAppVersion
-  #define MyAppVersion "2.0.11"
+  #define MyAppVersion "2.0.12"
 #endif
 
 [Setup]
