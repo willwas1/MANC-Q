@@ -122,6 +122,12 @@ SETTINGS = dict(
     LOD_SNR=3, LOQ_SNR=10,
     Q_MIN_DOMINANCE=0.60, Q_MAX_MISFIT=0.25, MAX_REPORTER_RATIO=2.0,
     MAX_CONC_OVER_BOUND=1.5,      # reported value may not exceed 1.5x the data upper bound
+    # the upper bound that is reported (upper_bound_mM, shown as <=value): a x the data bound + b x LOD_mM. The data
+    # bound itself (the observed height at the compound's most constraining multiplet) was below the truth for 23 to
+    # 26 % of present compounds graded Upper bound only in the stress test on synthetic spectra, because a
+    # neighbour, the baseline or a line shape mismatch can take part of the signal; (1.8, 1.0) holds the truth for
+    # 95 to 96.5 %. The grading decisions above use the data bound itself. (1.0, 0.0) switches the margin off.
+    UB_MARGIN=(1.8, 1.0),
     SINGLE_REPORTER_MIN_SHARE=0.3,  # a single clean reporter must carry >=30% of the molecule's protons
     CONTRADICT_MIN_SNR=10, CONTRADICT_FRACTION=0.3,   # predicted multiplet >10 sigma but <30% observed -> reject
     NEEDS_FIT_SUPPORT=True,       # a value from a single reporter multiplet is kept only if at least one other multiplet

@@ -113,7 +113,9 @@ signal was below this sample's detection limit (LOD_mM). It may reflect true abs
 detect, or a peak MANC-Q could not resolve in that spectrum. It is not proof that the metabolite is absent.
 Upper bounds are not measurements, so they are blank in the workbook's Concentration_mM_all sheet and in
 `concentrations_long.csv` (the bound is in Report_mM as `<=value` and in the `upper_bound_mM` column), and they
-are never included in the means on the Summary sheet.
+are never included in the means on the Summary sheet. The bound has a safety margin (1.8 x what the data allow
+at the compound's most constraining peak, plus the LOD), so it holds even when a neighbour or the baseline has
+taken part of the signal.
 
 **Quality of each spectrum.** Above each column, `QC: check` (amber) or `QC: poor` (red) marks a spectrum
 worth a look; hover over the column title for the reasons: a broad TSP line (shimming), a TSP line much

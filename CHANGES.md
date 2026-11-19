@@ -2,6 +2,31 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 2.0.10 (19 November 2026)
+
+The reported upper bound now has a safety margin. This changes the `upper_bound_mM` column (and the `<=value`
+shown for "Upper bound only"). No concentration, SE or tier changes.
+
+* **The problem.** In both stress tests on synthetic spectra of known composition, the true amount was above the
+  reported bound for 23 to 26 % of present compounds graded "Upper bound only", and above it by more than 10 % in
+  about 17 %. A result reported as "at most x mM" should hold nearly always. The bound was the height the data
+  show at the compound's most constraining multiplet, divided by the height one unit of the compound would give
+  there. It is too low when a neighbour, the baseline or a small line shape mismatch has taken part of the
+  signal at that multiplet, and the misses were worst for strong compounds (about half missed at S/N above 1000).
+* **The change.** `upper_bound_mM` is now 1.8 x that data bound + 1 x LOD_mM (setting `UB_MARGIN`, `(1.0, 0.0)`
+  switches it off). The grading decisions that use the bound (Not detected below the LOD, a value more than 1.5 x
+  the bound, a deconvolution estimate within the bound) still use the data bound itself, which is why no tier
+  changes.
+* **What it gives.** The margin was chosen on the second stress run (2,000 spectra at 600 MHz, refitted from their
+  saved fits) and checked on the first run (1,600 other spectra): the bound holds the truth for 96.5 % and 95.2 %,
+  against 78 % and 74 % before. The price is a looser bound: typically 3.7 to 4.1 x the true amount instead of 1.9
+  to 2.1 x. Strong compounds are still the weakest case (86 % at S/N above 1000).
+* **Other forms tried.** Taking the bound from more than one multiplet (the second lowest, the 34th percentile or
+  the median), a margin that grows with the compound's misfit, and never reporting a bound below the
+  whole-compound fit gave the same or a looser bound for the same coverage, so the simplest form was kept.
+* **Older results.** `python -m mancq regrade <results folder>` applies the new bound without fitting again.
+* New check: `tests/test_upper_bound_margin.py`.
+
 ## 2.0.9 (10 November 2026)
 
 The reported standard error now includes model error, not only the noise. This changes the SE of every value. No

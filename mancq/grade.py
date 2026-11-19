@@ -22,6 +22,15 @@ def total_se(tier, conc, se_noise, misfit, *, S):
     return float(np.hypot(se_noise, floor * conc))
 
 
+def reported_bound(ub, lod, *, S):
+    """The upper bound that is reported: a x the data bound + b x LOD (setting UB_MARGIN), so that it holds when a
+    neighbour, the baseline or a line shape mismatch has taken part of the compound's signal. NaN stays NaN."""
+    a, b = S["UB_MARGIN"]
+    if not np.isfinite(ub):
+        return ub
+    return float(a * ub + (b * lod if np.isfinite(lod) else 0.0))
+
+
 def grade(res, lib, sf, cf, *, S):
     """cf converts a per-proton area to mM in the medium. Per-multiplet quality
     measures come from the local (ROI) fits, where each multiplet has its own
@@ -198,7 +207,7 @@ def grade(res, lib, sf, cf, *, S):
                     and wc_se <= S["DECONV_MAX_REL_SE"] * wc):
                 tier, conc, se = DECONV, wc, wc_se
                 method = (f"whole-compound deconvolution over {n_fit} fitted multiplets, "
-                          f"no resolved reporter (data upper bound {ub:.3g} mM)")
+                          f"no resolved reporter (upper bound {reported_bound(ub, lod, S=S):.3g} mM)")
             else:
                 if not np.isfinite(ub):
                     ub = conc                 # no multiplet gave a bound: the whole-compound fit is the bound
@@ -216,7 +225,8 @@ def grade(res, lib, sf, cf, *, S):
             if tier in ("Quantified", "Overlapped (semi-quantitative)") else ""
         rows.append(dict(metabolite=c["name"], cls=c["cls"], tier=tier, conc_mM=conc, se_mM=se, se_noise_mM=se_noise,
                          whole_compound_fit_mM=a * cf if a > 0 else 0.0, method=method, reporter_ppm=rep_ppm,
-                         LOD_mM=lod, upper_bound_mM=ub, snr=round(snr, 1), best_dominance=round(best_dom, 3),
+                         LOD_mM=lod, upper_bound_mM=reported_bound(ub, lod, S=S), snr=round(snr, 1),
+                         best_dominance=round(best_dom, 3),
                          best_misfit=round(best_mis, 3) if np.isfinite(best_mis) else np.nan,
                          n_reporters=len(use), reporter_ratio=round(cross, 3) if np.isfinite(cross) else np.nan,
                          source=c["source"], provenance=c["provenance"]))

@@ -35,7 +35,7 @@ from .library import parse_gissmo, build_library, prepare_library, group_multipl
 from .fit import (pv, noise_sigma, fit_tsp, PH_COLUMNS, ph_from_shift, shift_from_ph, _peak_candidates, estimate_ph,
                   histidine_targets, mcol, mcol_d, spline_basis, Grid, fit_spectrum, _observed_height,
                   _contradicted_by, _n_lines, _excluded_fraction, detect_pluronic)
-from .grade import (grade, _main_partner, _reporter_doubt, observed_peaks, shown_value, TIER_COLOURS, TIER_ORDER,
+from .grade import (grade, reported_bound, _main_partner, _reporter_doubt, observed_peaks, shown_value, TIER_COLOURS, TIER_ORDER,
                     apply_manual, OBS_COLUMNS, read_observed)
 from .report import (_plt, plt, PALETTE, TAG, gapped, overlay_pdf, gallery_from_csv, profiles_pdf, _metabolite_fwhm,
                      qc_flags, NOT_DETECTED_NOTE, UPPER_BOUND_NOTE, ph_readme, aggregate_outputs)

@@ -168,7 +168,9 @@ sheet. Each value has a confidence tier:
 
 Always read the tier with the number. "1.2 mM, Quantified" is a measurement; "<=1.2 mM, Upper bound" only says
 it is not more than 1.2 mM, so upper bounds are left blank in the value tables (Concentration_mM_all,
-`concentrations_long.csv`) and never enter the means on the Summary sheet. Metabolites graded Not detected are
+`concentrations_long.csv`) and never enter the means on the Summary sheet. The bound has a safety margin (1.8 x
+what the data allow at the compound's most constraining peak, plus the LOD), so it holds even when a neighbour or
+the baseline has taken part of the signal. Metabolites graded Not detected are
 recorded as 0 mM. A zero means the signal was below this sample's detection limit (LOD_mM). It may reflect true
 absence, a concentration too low to detect, or a peak MANC-Q could not resolve in that spectrum. It is not proof
 that the metabolite is absent. When a value looks surprising, open `overlay_sample_<EXPNO>.pdf`, which shows the
