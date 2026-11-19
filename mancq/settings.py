@@ -147,6 +147,12 @@ SETTINGS = dict(
                                   # median value within 20% of the reporter value; otherwise Overlapped
     SINGLET_NEEDS_SECOND=True,    # a lone singlet reporter is Quantified only if another multiplet of the molecule agrees
                                   # (molecules with no other multiplet outside the ignored regions, e.g. acetate, are exempt)
+    # a value that rests on one singlet (a single one-line reporter) needs a peak the compound clearly owns, close to
+    # its library position: at least this dominance, and no more than this shift (Hz) unless the dominance is at least
+    # LONE_SINGLET_SHIFT_OK_DOMINANCE; otherwise Upper bound only. In the stress test on synthetic spectra, single-
+    # singlet compounds (glycolate, succinate, oxaloacetate, acetone, ...) gave 70 % of the values reported for absent
+    # compounds, mostly from a foreign singlet near their position.
+    LONE_SINGLET_MIN_DOMINANCE=0.5, LONE_SINGLET_MAX_SHIFT_HZ=5.0, LONE_SINGLET_SHIFT_OK_DOMINANCE=0.9,
 
     # plots
     OVERLAY_REGIONS=[(0.75, 1.10), (1.10, 1.55), (1.55, 2.00), (2.00, 2.35), (2.35, 2.75),

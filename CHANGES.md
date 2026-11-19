@@ -2,6 +2,34 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 2.0.11 (19 November 2026)
+
+A value that rests on one singlet now needs stronger evidence. Some compounds that were graded with a value become
+"Upper bound only"; no other value, SE or tier changes.
+
+* **The problem.** In both stress tests on synthetic spectra, compounds that were not in a spectrum were given a
+  value in 1.2 to 1.5 % of cases, which is within the limit overall, but a handful of compounds were given one far
+  more often: glycolate in 19 % of the spectra where it was absent, then acetate, succinate, oxaloacetate,
+  dimethylsulfone, acetonitrile, TMAO and acetone (5 to 11 %). 70 % of all such false values were values that
+  rested on a single singlet. A singlet from another compound (or from something not in the library) near a
+  library singlet looks exactly like it, so one peak alone is weak evidence.
+* **The change.** When a Quantified or Overlapped value comes from one reporter multiplet that is a single line,
+  the compound is graded "Upper bound only" (with the reason in the method column) if that singlet has less than
+  half of the fitted signal at its peak (`LONE_SINGLET_MIN_DOMINANCE` 0.5), or if it sits more than 5 Hz from its
+  library position (`LONE_SINGLET_MAX_SHIFT_HZ`) while having less than 90 % of the signal there
+  (`LONE_SINGLET_SHIFT_OK_DOMINANCE`). A singlet that clearly owns its peak keeps its value even if the pH has
+  moved it. Compounds with more than one reporter, or with a multiplet as reporter, are not affected.
+* **What it gives.** The rule was chosen on the second stress run (2,000 spectra at 600 MHz, regraded from their
+  saved fits) and checked on the first run (1,600 other spectra). Values for absent compounds: 1.20 % to 0.70 %
+  and 1.25 % to 0.74 %; glycolate 18.7 % to 4.0 % and 19.2 % to 4.8 %; no single-peak compound is above 5 % in
+  either run. The price: 1.4 % of the values for compounds that were present are lost (85 to 95 of them
+  Quantified per run, the rest Overlapped), and those lost values were the poor ones: only 64 to 67 % were within
+  25 % of the truth, against 97 % for the single-singlet values that are kept.
+* **Still open.** Histidine, which is not a single-peak compound, is still given a value in 5 to 7.5 % of the
+  spectra without it (mostly Overlapped).
+* **Older results.** `python -m mancq regrade <results folder>` applies the rule without fitting again.
+* New check: `tests/test_lone_singlet.py`.
+
 ## 2.0.10 (19 November 2026)
 
 The reported upper bound now has a safety margin. This changes the `upper_bound_mM` column (and the `<=value`

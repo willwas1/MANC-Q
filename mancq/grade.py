@@ -213,6 +213,13 @@ def grade(res, lib, sf, cf, *, S):
                     ub = conc                 # no multiplet gave a bound: the whole-compound fit is the bound
                 tier, conc = "Upper bound only", np.nan
                 method = "no usable reporter -> data upper bound"
+        if tier in ("Quantified", "Overlapped (semi-quantitative)") and (why_lone := _lone_singlet_doubt(use, sf, S=S)):
+            # a value that rests on one singlet and nothing else: a foreign singlet near the library position looks
+            # exactly like it, so it needs a peak the compound clearly owns, close to where the library puts it
+            if not np.isfinite(ub):
+                ub = conc
+            tier, conc = "Upper bound only", np.nan
+            method = f"{method}; {why_lone} -> data upper bound"
         if tier == "Upper bound only":
             se = np.nan                       # a bound is not a measurement (the bound is in upper_bound_mM)
         se_noise = se
@@ -236,6 +243,24 @@ def grade(res, lib, sf, cf, *, S):
         r["check_note"] = "; ".join(t for who, t in notes.get(r["metabolite"], []) if who in no_value) \
             if r["tier"] != NOTMEAS else ""
     return pd.DataFrame(rows), pd.DataFrame(prow)
+
+
+def _lone_singlet_doubt(use, sf, *, S):
+    """Why a value from a single one-line reporter should not be given (or ""): the singlet has less than
+    LONE_SINGLET_MIN_DOMINANCE of the fitted signal at its peak, or it sits more than LONE_SINGLET_MAX_SHIFT_HZ from
+    the library position without clearly owning its peak (dominance below LONE_SINGLET_SHIFT_OK_DOMINANCE)."""
+    if len(use) != 1 or _n_lines(use[0]) != 1:
+        return ""
+    m = use[0]
+    dom = float(m.get("loc_dom", 0.0))
+    shift = abs(float(m["d"] - m["base"])) * sf
+    if dom < S["LONE_SINGLET_MIN_DOMINANCE"]:
+        return (f"the value rests on one singlet that has only {dom:.0%} of the signal at its peak "
+                f"(at least {S['LONE_SINGLET_MIN_DOMINANCE']:.0%} needed)")
+    if shift > S["LONE_SINGLET_MAX_SHIFT_HZ"] and dom < S["LONE_SINGLET_SHIFT_OK_DOMINANCE"]:
+        return (f"the value rests on one singlet {shift:.1f} Hz from its library position (more than "
+                f"{S['LONE_SINGLET_MAX_SHIFT_HZ']:g} Hz) that has only {dom:.0%} of the signal at its peak")
+    return ""
 
 
 def _main_partner(res, k, ppm, half):
