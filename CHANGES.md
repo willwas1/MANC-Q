@@ -2,6 +2,31 @@
 
 Each version is kept in its own folder. Every change, however small, gets a new version number.
 
+## 2.0.13 (20 November 2026)
+
+The ghost rule's shift limit is 10 Hz instead of 5 Hz (`GHOST_SHIFT_HZ`). This changes the fit.
+
+* **The problem.** The second part of the ghost rule leaves out of the fit a compound whose signal sits more than
+  `GHOST_SHIFT_HZ` from its library position while the other multiplets it implies get almost nothing. The 5 Hz
+  limit was set on synthetic 600 MHz spectra, where present compounds sit a median 1.0 Hz from the library (99 %
+  within 7 Hz). In 65 real 800 MHz culture spectra, compounds that are clearly present (Quantified, dominance at
+  least 0.8) sit a median 3.1 Hz away, 12 % of their multiplets beyond 5 Hz and 99 % within 8 Hz. The rule left out
+  lysine in 49 of those spectra and arginine in most, at 5 to 9.6 Hz.
+* **The change.** 10 Hz, just above what clearly present compounds show in real spectra (and above the 8 Hz each
+  compound may move in the fit). The limit for pH-sensitive compounds stays 15 Hz. The 5 Hz limit of the 2.0.11
+  singlet rule is unchanged: at 10 Hz glycolate rose back above 5 % false values in the stress test.
+* **What it gives.** In the 65 culture spectra lysine has a value in 64 instead of 16, glutamine 27 instead of 18,
+  serine 56 instead of 45, glucose 63 instead of 60 (and closer to a manual integration panel); 2,450 values in all
+  instead of 2,220. Arginine stays an upper bound in most: it is no longer left out of the fit, but all its
+  multiplets lie under other compounds, so it has no usable reporter.
+* **The price, on synthetic spectra.** The same 150 stress-test spectra refitted with 2.0.13, against 2.0.12:
+  absent compounds given a value 1.07 to 1.34 % (graded Quantified 0.31 to 0.29 %; look-alike set 0.73 to 0.89 %),
+  present compounds given a value 86.1 to 86.8 %, Quantified within 10 % of the truth 97.2 to 96.0 %, Overlapped
+  within 25 % 94.6 to 92.6 %. All within the stress-test limits. The synthetic spectra move compounds less than real
+  samples do, so a compound 5-10 Hz from the library is more often a stand-in there than in real samples.
+* **Older results.** Results folders need fitting again; regrade is not enough. `GHOST_SHIFT_HZ=5.0` gives the old
+  behaviour.
+
 ## 2.0.12 (19 November 2026)
 
 A compound is no longer left out of the fit because a neighbour inflated one of its multiplets. This changes the fit
